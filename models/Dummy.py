@@ -37,20 +37,13 @@ class Dummy(nn.Module):
         # ppg_signals: (batch_size, window_size, 1)
 
         device = nir_imgs.device
+        logits = self.model(nir_imgs[:, 1] - nir_imgs[:, 0])
         if ppg_signals is not None:
             # if we are given some desired targets also calculate the loss
             if self.config.out_dim == 1:
                 # for differentiated ppg regression
-                logits = self.model(nir_imgs[:, 1] - nir_imgs[:, 0])
-                loss = F.mse_loss(logits, ppg_signals[:, 1] - ppg_signals[:, 0])
-            else:
-                pass  # TODO: for seq2seq
-        else:
-            # inference-time with no targets
-            if self.config.out_dim == 1:
-                # for differentiated ppg regression
-                logits = self.model(nir_imgs)
-                loss = None
+                labels = ppg_signals[:, 1] - ppg_signals[:, 0]
+                loss = F.mse_loss(logits, labels)
             else:
                 pass  # TODO: for seq2seq
 

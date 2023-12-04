@@ -17,8 +17,8 @@ class MRNIRPIndoorDatasetConfig:
     dataset_root_path: str = '/mnt/Data/MR-NIRP_Indoor/'
     window_size: int = 2  # unit: frames
     window_stride: int = 1  # unit: frames
-    img_size_h: int = 256
-    img_size_w: int = 256
+    img_size_h: int = 640
+    img_size_w: int = 640
     video_fps: float = 30.
     ppg_fps: float = 60.
 
@@ -95,7 +95,7 @@ class MRNIRPIndoorDataset(Dataset):
         # NOTE: Important to normalize the images to [0, 1] range, or else the training loss will not converge and only random accuracy will be achieved
         # FIXME: Cannot normalize each image separately, or else the rppg intensity will be lost
         nir_imgs = torch.stack([torch.from_numpy(
-                                    cv2.normalize(cv2.imread(nir_path, cv2.IMREAD_UNCHANGED),
+                                    cv2.normalize(cv2.resize(cv2.imread(nir_path, cv2.IMREAD_UNCHANGED), (self.config.img_size_w, self.config.img_size_h), interpolation=cv2.INTER_AREA),
                                                   None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F).astype(np.float32)[np.newaxis, ...]).float()
                                 for nir_path in self.data[idx][0]])
         ppg_signals = torch.from_numpy(self.data[idx][1][..., np.newaxis]).float()

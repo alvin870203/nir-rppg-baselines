@@ -41,7 +41,6 @@ out_dim = 1
 bias = False # do we use bias inside Conv2D and Linear layers?
 # system related
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
-dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
 num_workers = 4
 # -----------------------------------------------------------------------------
@@ -54,12 +53,6 @@ config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # various inits, derived attributes, I/O setup
 os.makedirs(out_dir, exist_ok=True)
 torch.manual_seed(1337)
-torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
-# note: float16 data type will automatically use a GradScaler
-ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
 
 # dataloader
@@ -122,19 +115,8 @@ match model_name:
 model.to(device)
 
 
-# initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
-
-
 # TODO: optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
-
-# compile the model
-if compile:
-    print("compiling the model... (takes a ~minute)")
-    unoptimized_model = model
-    model = torch.compile(model) # requires PyTorch 2.0
 
 
 # TODO: learning rate decay scheduler (cosine with warmup)
@@ -155,26 +137,20 @@ for epoch in range(max_epochs):
 
 
     # train
-    # forward backward update, using the GradScaler if data type is float16 and
+    # forward backward update
     # TODO: with optional gradient accumulation to simulate larger batch size
     model.train()
     losses = torch.zeros(len(train_dataloader))
     for batch_idx, (nir_imgs, ppg_signals) in enumerate(tqdm(train_dataloader, desc=f'train epoch{epoch}')):
         # print(f'train: {epoch=}, {batch_idx=}')
-        if device_type == 'cuda':
-            # pin arrays nir_imgs,ppg_signals, which allows us to move them to GPU asynchronously (non_blocking=True)
-            nir_imgs = nir_imgs.pin_memory().to(device, non_blocking=True)
-            ppg_signals = ppg_signals.pin_memory().to(device, non_blocking=True)
-        else:
-            nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
-        with ctx:
-            logits, loss = model(nir_imgs, ppg_signals)
-        # backward pass, with gradient scaling if training in fp16
-        scaler.scale(loss).backward()
+        nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
+        logits, loss = model(nir_imgs, ppg_signals)
+        # backward pass
+        loss.backward()
         # TODO: clip the gradient
-        # step the optimizer and scaler if training in fp16
-        scaler.step(optimizer)
-        scaler.update()
+        # step the optimizer
+        optimizer.step()
+
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
         # get loss as float. note: this is a CPU-GPU sync point
@@ -188,14 +164,8 @@ for epoch in range(max_epochs):
         losses = torch.zeros(len(val_dataloader))
         for batch_idx, (nir_imgs, ppg_signals) in enumerate(tqdm(val_dataloader, desc=f'val epoch{epoch}')):
             # print(f'val: {epoch=}, {batch_idx=}')
-            if device_type == 'cuda':
-                # pin arrays nir_imgs,ppg_signals, which allows us to move them to GPU asynchronously (non_blocking=True)
-                nir_imgs = nir_imgs.pin_memory().to(device, non_blocking=True)
-                ppg_signals = ppg_signals.pin_memory().to(device, non_blocking=True)
-            else:
-                nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
-            with ctx:
-                logits, loss = model(nir_imgs, ppg_signals)
+            nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
+            logits, loss = model(nir_imgs, ppg_signals)
             losses[batch_idx] = loss.item()
         val_loss = losses.mean().item()
 
