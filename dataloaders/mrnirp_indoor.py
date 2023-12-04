@@ -6,6 +6,7 @@ import scipy.io as sio
 import scipy.signal as sig
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
+from tqdm import tqdm
 
 import torch
 from torch.utils.data import Dataset
@@ -73,13 +74,18 @@ class MRNIRPIndoorDataset(Dataset):
         return data_raw
 
 
-    def window_data(self) -> list[tuple[list[str], np.ndarray]]:
+    def window_data(self) -> list[tuple[np.ndarray, np.ndarray]]:
         data = []
-        for subject_name, (nir_path_list, ppg_signal) in self.data_raw.items():
+        for subject_name, (nir_path_list, ppg_signal) in tqdm(self.data_raw.items(), desc=f"Reading data"):
             for idx in range(0, len(nir_path_list) - self.config.window_size + 1, self.config.window_stride):
                 if np.any(ppg_signal[idx : idx + self.config.window_size] < 1):
                     continue
-                data.append((nir_path_list[idx : idx + self.config.window_size],
+                # NOTE: Important to normalize the images to [0, 1] range, or else the training loss will not converge and only random accuracy will be achieved
+                # FIXME: Cannot normalize each image separately, or else the rppg intensity will be lost
+                nir_imgs = np.stack([cv2.normalize(cv2.resize(cv2.imread(nir_path, cv2.IMREAD_UNCHANGED), (self.config.img_size_w, self.config.img_size_h), interpolation=cv2.INTER_AREA),
+                                                   None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F).astype(np.float32)[np.newaxis, ...]
+                                     for nir_path in nir_path_list[idx : idx + self.config.window_size]])
+                data.append((nir_imgs,
                              ppg_signal[idx : idx + self.config.window_size]))
 
         return data
@@ -92,11 +98,6 @@ class MRNIRPIndoorDataset(Dataset):
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
         # nir_imgs: (batch_size, window_size, 1, img_size_h, img_size_w)
         # ppg_signals: (batch_size, window_size, 1)
-        # NOTE: Important to normalize the images to [0, 1] range, or else the training loss will not converge and only random accuracy will be achieved
-        # FIXME: Cannot normalize each image separately, or else the rppg intensity will be lost
-        nir_imgs = torch.stack([torch.from_numpy(
-                                    cv2.normalize(cv2.resize(cv2.imread(nir_path, cv2.IMREAD_UNCHANGED), (self.config.img_size_w, self.config.img_size_h), interpolation=cv2.INTER_AREA),
-                                                  None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F).astype(np.float32)[np.newaxis, ...]).float()
-                                for nir_path in self.data[idx][0]])
+        nir_imgs = torch.from_numpy(self.data[idx][0]).float()
         ppg_signals = torch.from_numpy(self.data[idx][1][..., np.newaxis]).float()
         return nir_imgs, ppg_signals
