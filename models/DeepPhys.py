@@ -71,10 +71,11 @@ class DeepPhys(nn.Module):
 
     def get_rppg_signals_diff_std(self, train_dataset: Dataset) -> float:
         rppg_signals_diff = []
-        for _, ppg_signals in train_dataset.data:
-            rppg_signals_diff.append(ppg_signals[1:] - ppg_signals[:-1])
+        for _, ppg_signals in train_dataset:
+            rppg_signals_diff.append((ppg_signals[1] - ppg_signals[0]))
         rppg_signals_diff = np.concatenate(rppg_signals_diff)
-        return np.std(rppg_signals_diff)
+        # np.save("rppg_signals_diff.npy", rppg_signals_diff)  # For inspecting the distribution by test_MR-NIRP_Indoor_statistics.ipynb
+        return rppg_signals_diff.std()
 
 
     def forward(self, nir_imgs: torch.Tensor, ppg_signals: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
@@ -146,5 +147,7 @@ class DeepPhys(nn.Module):
                 loss = F.mse_loss(logits, labels)
             else:
                 pass  # TODO: for seq2seq
+        else:
+            loss = None
 
         return logits, loss

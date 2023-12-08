@@ -29,75 +29,61 @@ class MRNIRPIndoorDataset(Dataset):
         assert split in ['train', 'val', 'test']
         self.config = config
         self.split = split
-        self.data_raw = self.load_data()
-        self.data = self.window_data()
+        self.data = self.load_data()  # dict of (subject_name, (nir_img_array, ppg_signal))
+        self.window_list = self.window_data()  # list of (subject_name, start_idx)
 
 
-    def load_data(self) -> dict[str, tuple[list[str], np.ndarray]]:
-        data_raw = {}
-        for subject_folder in glob.glob(os.path.join(self.config.dataset_root_path, '*')):
+    def load_data(self) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        data = {}
+        for subject_npz_path in glob.glob(os.path.join(self.config.dataset_root_path, '*.npz')):
             # TODO: select subject by self.split
-            if self.split == 'train' and os.path.basename(subject_folder) == 'Subject1_motion_940':
+            if self.split == 'train' and os.path.basename(subject_npz_path) == 'Subject1_motion_940.npz':
                 continue
-            elif self.split == 'val' and os.path.basename(subject_folder) != 'Subject1_motion_940':
+            elif self.split == 'val' and os.path.basename(subject_npz_path) != 'Subject1_motion_940.npz':
                 continue
             else:
                 pass  # correct split
-            if not os.path.isdir(subject_folder):
-                continue
 
-            if os.path.isdir(os.path.join(subject_folder, "NIR")):
-                nir_path_list = sorted(glob.glob(os.path.join(subject_folder, "NIR", "*.pgm")))
-            else:
-                nir_path_list = sorted(glob.glob(os.path.join(subject_folder, "cam_flea3_1", "*.pgm")))
+            subject_npz = np.load(subject_npz_path)
+            # NOTE: Important to normalize the images to [0, 1] range, or else the training loss will not converge and only random accuracy will be achieved.
+            #       The nir_img_array is already normalized to [0, 1] range in the npz file. See preparation/ for details.
+            nir_img_array = subject_npz["nir_img_array"]
+            ppg_signal = subject_npz["ppg_signal"]
+            ppg_time = subject_npz["ppg_time"]
 
-            ppg_mat = sio.loadmat(os.path.join(subject_folder, "PulseOX", "pulseOx.mat"))
-            ppg_signal_corrupted = ppg_mat["pulseOxRecord"].squeeze()
-            ppg_time_corrupted = ppg_mat["pulseOxTime"][0]
-            ppg_signal, ppg_time = [], []
-            for idx, (value, time) in enumerate(zip(ppg_signal_corrupted, ppg_time_corrupted)):
-                num_values = len(value[0]) if isinstance(value, np.ndarray) else 1
-                if num_values > 1:  # Multiple values at a time step due to queued delayed ppg signal
-                    for sub_idx, sub_value in enumerate(value[0]):
-                        ppg_time.append(ppg_time_corrupted[idx-1] + ((sub_idx+1) / num_values) * (time - ppg_time_corrupted[idx-1]))
-                        ppg_signal.append(sub_value)
-                else:
-                    ppg_time.append(time)
-                    ppg_signal.append(value.item())
-            ppg_signal = np.array(ppg_signal)
-            ppg_time = np.array(ppg_time)
+            # Resize NIR images
+            nir_img_array = np.array([cv2.resize(nir_img, (self.config.img_size_w, self.config.img_size_h), interpolation=cv2.INTER_AREA)
+                                      for nir_img in nir_img_array])
+
             # Resample ppg_signal to the same size as nir_path_list
-            ppg_signal_resampled = sig.resample(ppg_signal, len(nir_path_list))
-            ppg_time_resampled = np.linspace(ppg_time[0], ppg_time[-1], len(nir_path_list))
-            data_raw[os.path.basename(subject_folder)] = (nir_path_list, ppg_signal_resampled)
+            ppg_signal_resampled = sig.resample(ppg_signal, len(nir_img_array))
+            ppg_time_resampled = np.linspace(ppg_time[0], ppg_time[-1], len(nir_img_array))
 
-        return data_raw
-
-
-    def window_data(self) -> list[tuple[np.ndarray, np.ndarray]]:
-        data = []
-        for subject_name, (nir_path_list, ppg_signal) in tqdm(self.data_raw.items(), desc=f"Reading data"):
-            for idx in range(0, len(nir_path_list) - self.config.window_size + 1, self.config.window_stride):
-                if np.any(ppg_signal[idx : idx + self.config.window_size] < 1):
-                    continue
-                # NOTE: Important to normalize the images to [0, 1] range, or else the training loss will not converge and only random accuracy will be achieved
-                # FIXME: Cannot normalize each image separately, or else the rppg intensity will be lost
-                nir_imgs = np.stack([cv2.normalize(cv2.resize(cv2.imread(nir_path, cv2.IMREAD_UNCHANGED), (self.config.img_size_w, self.config.img_size_h), interpolation=cv2.INTER_AREA),
-                                                   None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F).astype(np.float32)[np.newaxis, ...]
-                                     for nir_path in nir_path_list[idx : idx + self.config.window_size]])
-                data.append((nir_imgs,
-                             ppg_signal[idx : idx + self.config.window_size]))
+            subject_name = os.path.basename(subject_npz_path).split('.')[0]
+            data[subject_name] = (nir_img_array, ppg_signal_resampled)
 
         return data
 
 
+    def window_data(self) -> list[tuple[str, int]]:
+        window_list = []
+        for subject_name, (nir_imgs, ppg_signal) in self.data.items():
+            for idx in range(0, len(nir_imgs) - self.config.window_size + 1, self.config.window_stride):
+                if np.any(ppg_signal[idx : idx + self.config.window_size] < 1):
+                    continue
+                window_list.append((subject_name, idx))
+
+        return window_list
+
+
     def __len__(self) -> int:
-        return len(self.data)
+        return len(self.window_list)
 
 
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
         # nir_imgs: (batch_size, window_size, 1, img_size_h, img_size_w)
         # ppg_signals: (batch_size, window_size, 1)
-        nir_imgs = torch.from_numpy(self.data[idx][0]).float()
-        ppg_signals = torch.from_numpy(self.data[idx][1][..., np.newaxis]).float()
+        subject_name, start_idx = self.window_list[idx]
+        nir_imgs = torch.from_numpy(self.data[subject_name][0][start_idx : start_idx + self.config.window_size, np.newaxis, ...]).float()
+        ppg_signals = torch.from_numpy(self.data[subject_name][1][start_idx : start_idx + self.config.window_size, np.newaxis]).float()
         return nir_imgs, ppg_signals
