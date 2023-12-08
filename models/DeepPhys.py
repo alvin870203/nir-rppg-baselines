@@ -25,9 +25,6 @@ class DeepPhys(nn.Module):
 
         self.rppg_signals_diff_std = self.get_rppg_signals_diff_std(train_dataset)
 
-        self.mask1 = None
-        self.mask2 = None
-
         # Implementation by terbed/Deep-rPPG
         # Appearance stream
         self.a_conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, stride=1, padding=1)
@@ -86,7 +83,7 @@ class DeepPhys(nn.Module):
 
         # Implementation by terbed/Deep-rPPG
         A = nir_imgs[:, 0]
-        M = nir_imgs[:, 1] - nir_imgs[:, 0]
+        M = torch.div(nir_imgs[:, 1] - nir_imgs[:, 0], nir_imgs[:, 1] + nir_imgs[:, 0] + 1e-8)  # +1e-8 to avoid division by zero
 
         # (A) - Appearance stream -------------------------------------------------------------
         # First two convolution layer
@@ -100,7 +97,6 @@ class DeepPhys(nn.Module):
         norm = 2 * torch.norm(mask1, p=1, dim=(1, 2, 3))
         norm = norm.reshape(B, 1, 1, 1)
         mask1 = torch.div(mask1 * H * W, norm)
-        self.mask1 = mask1
 
         # Pooling
         A = self.a_avgpool(A)
@@ -115,7 +111,6 @@ class DeepPhys(nn.Module):
         norm = 2 * torch.norm(mask2, p=1, dim=(1, 2, 3))
         norm = norm.reshape(B, 1, 1, 1)
         mask2 = torch.div(mask2 * H * W, norm)
-        self.mask2 = mask2
 
         # (M) - Motion stream --------------------------------------------------------------------
         M = torch.tanh(self.m_bn1(self.m_conv1(M)))

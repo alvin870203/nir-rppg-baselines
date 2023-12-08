@@ -29,4 +29,4 @@ out_dim = 1
 bias = False
 
 # system related
-compile = False  # NOTE: remove self.mask = None to enable this
+compile = False
