@@ -1,5 +1,7 @@
 # Config for training a dummy model on MR-NIRP Indoor dataset
 
+import time
+
 # data related
 dataset_name = 'MR-NIRP_Indoor'
 window_size = 2  # unit: frames
@@ -15,18 +17,25 @@ train_list = (                       'Subject1_still_940', 'Subject2_motion_940'
 val_list = ('Subject1_motion_940')
 
 # training related
-max_epochs = 50
+# the number of examples per iter:
+# 128 batch_size * 1 grad_accum = 128 clips/iter
+# MR-NIRP_Indoor has 58,718 clips (when window size=2, stride=1), so 1 epoch ~= 458.7 iters
+max_iters = 25000
+gradient_accumulation_steps = 1
 train_batch_size = 128
 
 # evaluation related
-eval_interval = 1  # unit: epochs
+eval_interval = 500  # unit: iters; keep frequent because we'll overfit
 eval_batch_size = 128
 
 # logging related
+timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
+out_dir = 'out/DeepPhys-MR-NIRP_Indoor/' + timestamp
 wandb_log = False
 wandb_project = 'MR-NIRP_Indoor'
-wandb_run_name = 'DeepPhys'
-log_interval = 1  # unit: epochs
+wandb_run_name = 'DeepPhys-' + timestamp
+log_interval = 100  # unit: iters; don't print too often
+always_save_checkpoint = False  # we expect to overfit on this small dataset, so only save when val improves
 
 # model related
 model_name = 'DeepPhys'
@@ -41,8 +50,8 @@ beta1 = 0.9
 beta2 = 0.95
 grad_clip = 0.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = True  # whether to decay the learning rate
-warmup_epochs = 5  # how many steps to warm up for
-lr_decay_epochs = 50  # should be ~= max_epochs
+warmup_iters = 2500  # how many steps to warm up for
+lr_decay_iters = 25000  # should be ~= max_iters
 min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10
 
 # system related

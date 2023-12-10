@@ -15,20 +15,23 @@ train_list = (                       'Subject1_still_940', 'Subject2_motion_940'
 val_list = ('Subject1_motion_940')
 
 # training related
-max_epochs = 10
+max_iters = 2500
 train_batch_size = 32
 
 # evaluation related
-eval_interval = 1  # unit: epochs
+eval_interval = 500  # unit: iters
 eval_batch_size = 32
 
 # logging related
 wandb_log = False
 wandb_project = 'MR-NIRP_Indoor'
 wandb_run_name = 'Dummy'
-log_interval = 1  # unit: epochs
+log_interval = 100  # unit: iters
 
 # model related
 model_name = 'Dummy'
 out_dim = 1
 bias = False
+
+# optimizer related
+learning_rate = 1e-3  # max learning rate

@@ -28,18 +28,18 @@ val_list = ()
 test_list = ()
 # training related
 init_from = 'scratch'  # 'scratch' or 'resume'
-max_epochs = 2
+max_iters = 2
 train_batch_size = 2
 gradient_accumulation_steps = 1 # used to simulate larger batch sizes
 # evaluation related
-eval_interval = 1  # unit: epochs
+eval_interval = 1  # unit: iters; should be at least iters/epoch in practice
 eval_batch_size = 1
 # logging related
 out_dir = 'out'
 wandb_log = True
 wandb_project = 'MR-NIRP_Indoor'
 wandb_run_name = 'dummy'
-log_interval = 1  # unit: epochs
+log_interval = 1  # unit: iters
 eval_only = False  # if True, script exits right after the first eval
 always_save_checkpoint = True  # if True, always save a checkpoint after each eval
 # model related
@@ -54,8 +54,8 @@ beta1 = 0.9
 beta2 = 0.95
 grad_clip = 0.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = False  # whether to decay the learning rate
-warmup_epochs = 1  # how many steps to warm up for
-lr_decay_epochs = 2  # should be ~= max_epochs
+warmup_iters = 1  # how many steps to warm up for
+lr_decay_iters = 2  # should be ~= max_iters
 min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10
 # system related
 device = 'cuda'  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
@@ -118,7 +118,7 @@ match dataset_name:
 
 
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
-epoch_num = 0
+iter_num = 0
 best_val_loss = 1e9
 
 
@@ -128,11 +128,12 @@ if init_from == 'scratch':
     print(f"Initializing a new {model_name} model from scratch")
 elif init_from == 'resume':
     print(f"Resuming training {model_name} from {out_dir}")
-    # TODO: assert model_name matches the checkpoint
     # resume training from a checkpoint.
     ckpt_path = os.path.join(out_dir, 'ckpt.pt')
     checkpoint = torch.load(ckpt_path, map_location=device)
     checkpoint_model_args = checkpoint['model_args']
+    assert model_name == checkpoint['config']['model_name'], "model_name mismatch"
+    assert dataset_name == checkpoint['config']['dataset_name'], "dataset_name mismatch"
 else:
     pass  # FUTURE: init from pretrained
 
@@ -190,7 +191,7 @@ if init_from == 'resume':
         if k.startswith(unwanted_prefix):
             state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
     model.load_state_dict(state_dict)
-    epoch_num = checkpoint['epoch_num']
+    iter_num = checkpoint['iter_num']
     best_val_loss = checkpoint['best_val_loss']
 
 model.to(device)
@@ -214,16 +215,38 @@ if compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 
+# helps estimate an arbitrarily accurate loss over either split using many batches
+@torch.no_grad()
+def estimate_loss():
+    out = {}
+    model.eval()
+    for split, loader in zip(['train', 'val'], [train_dataloader, val_dataloader]):
+        losses = torch.zeros(len(loader))
+        for batch_idx, (nir_imgs, ppg_signals) in enumerate(loader):
+            if device_type == 'cuda':
+                # pin arrays nir_imgs,ppg_signals, which allows us to move them to GPU asynchronously (non_blocking=True)
+                nir_imgs = nir_imgs.to(device, non_blocking=True)
+                ppg_signals = ppg_signals.to(device, non_blocking=True)
+            else:
+                nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
+            with ctx:
+                logits, loss = model(nir_imgs, ppg_signals)
+            losses[batch_idx] = loss.item()
+        out[split] = losses.mean()
+    model.train()
+    return out
+
+
 # learning rate decay scheduler (cosine with warmup)
-def get_lr(epoch):
+def get_lr(iter):
     # 1) linear warmup for warmup_iters steps
-    if epoch < warmup_epochs:
-        return learning_rate * epoch / warmup_epochs
-    # 2) if ep > lr_decay_epochs, return min learning rate
-    if epoch > lr_decay_epochs:
+    if iter < warmup_iters:
+        return learning_rate * iter / warmup_iters
+    # 2) if ep > lr_decay_iters, return min learning rate
+    if iter > lr_decay_iters:
         return min_lr
     # 3) in between, use cosine decay down to min learning rate
-    decay_ratio = (epoch - warmup_epochs) / (lr_decay_epochs - warmup_epochs)
+    decay_ratio = (iter - warmup_iters) / (lr_decay_iters - warmup_iters)
     assert 0 <= decay_ratio <= 1
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
     return min_lr + coeff * (learning_rate - min_lr)
@@ -235,111 +258,99 @@ if wandb_log:
 
 
 # training loop
+train_dataiter = iter(train_dataloader)
+nir_imgs, ppg_signals = next(train_dataiter)  # fetch the very first batch
+if device_type == 'cuda':
+    # pin arrays nir_imgs,ppg_signals, which allows us to move them to GPU asynchronously (non_blocking=True)
+    nir_imgs = nir_imgs.to(device, non_blocking=True)
+    ppg_signals = ppg_signals.to(device, non_blocking=True)
+else:
+    nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
 t0 = time.time()
-local_epoch_num = 0  # number of epochs in the lifetime of this process
+local_iter_num = 0  # number of iters in the lifetime of this process
 while True:
 
 
     # determine and set the learning rate for this iteration
-    lr = get_lr(epoch_num) if decay_lr else learning_rate
+    lr = get_lr(iter_num) if decay_lr else learning_rate
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
 
     # evaluate the loss on train/val sets and write checkpoints
-    if epoch_num % eval_interval == 0:
-        losses = {'train': 0.0, 'val': 0.0}  # TODO: implement this
-        print(f"step {epoch_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+    if iter_num % eval_interval == 0:
+        losses = estimate_loss()
+        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
         if wandb_log:
             wandb.log({
-                "epoch": epoch_num,
+                "iter": iter_num,
                 "train/loss": losses['train'],
                 "val/loss": losses['val'],
                 "lr": lr,
-                # "mfu": TODO: estimate mfu and convert it to percentage
+                # "mfu": FUTURE: estimate mfu and convert it to percentage
             })
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val']
-            if epoch_num > 0:
+            if iter_num > 0:
                 checkpoint = {
                     'model': model.state_dict(),
                     'optimizer': optimizer.state_dict(),
                     'model_args': model_args,
-                    'epoch_num': epoch_num,
+                    'iter_num': iter_num,
                     'best_val_loss': best_val_loss,
                     'config': config
                 }
                 print(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
-    if epoch_num == 0 and eval_only:
+    if iter_num == 0 and eval_only:
         break
 
 
-    # train
-    # forward backward update, using the GradScaler if data type is float16
-    # and with optional gradient accumulation to simulate larger batch size
-    model.train()
-    losses = []
-    for batch_idx, (nir_imgs, ppg_signals) in enumerate(tqdm(train_dataloader, desc=f'train epoch{epoch_num}')):
-
+    # forward backward update, with optional gradient accumulation to simulate larger batch size
+    # and using the GradScaler if data type is float16
+    for micro_step in range(gradient_accumulation_steps):
+        with ctx:
+            logits, loss = model(nir_imgs, ppg_signals)
+            loss = loss / gradient_accumulation_steps  # scale the loss to account for gradient accumulation
+        # immediately async prefetch next batch while model is doing the forward pass on the GPU
+        # and re-init iterator if needed
+        try:
+            nir_imgs, ppg_signals = next(train_dataiter)
+        except StopIteration:
+            train_dataiter = iter(train_dataloader)
+            nir_imgs, ppg_signals = next(train_dataiter)
         if device_type == 'cuda':
             # pin arrays nir_imgs,ppg_signals, which allows us to move them to GPU asynchronously (non_blocking=True)
             nir_imgs = nir_imgs.to(device, non_blocking=True)
             ppg_signals = ppg_signals.to(device, non_blocking=True)
         else:
             nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
-        with ctx:
-            logits, loss = model(nir_imgs, ppg_signals)
-            # FIXME: Do we need to scale the loss differently if the remaining steps are less than gradient_accumulation_steps?
-            loss = loss / gradient_accumulation_steps  # scale the loss to account for gradient accumulation
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
-        if ((batch_idx + 1) % gradient_accumulation_steps == 0) or (batch_idx + 1 == len(train_dataloader)):
-            # clip the gradient
-            if grad_clip != 0.0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            # step the optimizer and scaler if training in fp16
-            scaler.step(optimizer)
-            scaler.update()
-            # flush the gradients as soon as we can, no need for this memory anymore
-            optimizer.zero_grad(set_to_none=True)
-            # get loss as float. note: this is a CPU-GPU sync point
-            # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
-            # FIXME: Do we need to scale the loss differently if the remaining steps are less than gradient_accumulation_steps?
-            lossf = loss.item() * gradient_accumulation_steps
-            losses.append(lossf)
-    train_loss = np.mean(losses)
-
-
-    # eval
-    with torch.no_grad():
-        model.eval()
-        losses = torch.zeros(len(val_dataloader))
-        for batch_idx, (nir_imgs, ppg_signals) in enumerate(tqdm(val_dataloader, desc=f'val epoch{epoch_num}')):
-            # print(f'val: {epoch=}, {batch_idx=}')
-            if device_type == 'cuda':
-                # pin arrays nir_imgs,ppg_signals, which allows us to move them to GPU asynchronously (non_blocking=True)
-                nir_imgs = nir_imgs.to(device, non_blocking=True)
-                ppg_signals = ppg_signals.to(device, non_blocking=True)
-            else:
-                nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
-            with ctx:
-                logits, loss = model(nir_imgs, ppg_signals)
-            losses[batch_idx] = loss.item()
-        val_loss = losses.mean().item()
+        # clip the gradient
+        if grad_clip != 0.0:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        # step the optimizer and scaler if training in fp16
+        scaler.step(optimizer)
+        scaler.update()
+        # flush the gradients as soon as we can, no need for this memory anymore
+        optimizer.zero_grad(set_to_none=True)
 
 
     # timing and logging
     t1 = time.time()
     dt = t1 - t0
     t0 = t1
-    if epoch_num % log_interval == 0:
-        # TODO: estimate mfu
-        print(f"epoch {epoch_num}: train loss {train_loss:.4f}, val loss {val_loss:.4f}, time {dt*1000:.2f}ms")
-    epoch_num += 1
-    local_epoch_num += 1
+    if iter_num % log_interval == 0:
+        # get loss as float. note: this is a CPU-GPU sync point
+        # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
+        lossf = loss.item() * gradient_accumulation_steps
+        # FUTURE: estimate mfu
+        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
+    iter_num += 1
+    local_iter_num += 1
 
     # termination conditions
-    if epoch_num > max_epochs:
+    if iter_num > max_iters:
         break
