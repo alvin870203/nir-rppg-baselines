@@ -268,6 +268,7 @@ else:
     nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
 t0 = time.time()
 local_iter_num = 0  # number of iters in the lifetime of this process
+pbar = tqdm(total=max_iters, initial=iter_num, dynamic_ncols=True)
 while True:
 
 
@@ -280,7 +281,7 @@ while True:
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0:
         losses = estimate_loss()
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        tqdm.write(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
@@ -300,7 +301,7 @@ while True:
                     'best_val_loss': best_val_loss,
                     'config': config
                 }
-                print(f"saving checkpoint to {out_dir}")
+                tqdm.write(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
     if iter_num == 0 and eval_only:
         break
@@ -347,10 +348,13 @@ while True:
         # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
         lossf = loss.item() * gradient_accumulation_steps
         # FUTURE: estimate mfu
-        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
+        tqdm.write(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
     iter_num += 1
     local_iter_num += 1
+    pbar.update(1)
 
     # termination conditions
     if iter_num > max_iters:
         break
+
+pbar.close()
