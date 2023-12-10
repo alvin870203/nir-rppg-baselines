@@ -22,6 +22,9 @@ class MRNIRPIndoorDatasetConfig:
     img_size_w: int = 640
     video_fps: float = 30.
     ppg_fps: float = 60.
+    train_list: tuple[str] = ()
+    val_list: tuple[str] = ()
+    test_list: tuple[str] = ()
 
 
 class MRNIRPIndoorDataset(Dataset):
@@ -36,10 +39,12 @@ class MRNIRPIndoorDataset(Dataset):
     def load_data(self) -> dict[str, tuple[np.ndarray, np.ndarray]]:
         data = {}
         for subject_npz_path in glob.glob(os.path.join(self.config.dataset_root_path, '*.npz')):
-            # TODO: select subject by self.split
-            if self.split == 'train' and os.path.basename(subject_npz_path) == 'Subject1_motion_940.npz':
+            subject_name = os.path.basename(subject_npz_path).split('.')[0]
+            if self.split == 'train' and subject_name not in self.config.train_list:
                 continue
-            elif self.split == 'val' and os.path.basename(subject_npz_path) != 'Subject1_motion_940.npz':
+            elif self.split == 'val' and subject_name not in self.config.val_list:
+                continue
+            elif self.split == 'test' and subject_name not in self.config.test_list:
                 continue
             else:
                 pass  # correct split
@@ -59,7 +64,6 @@ class MRNIRPIndoorDataset(Dataset):
             ppg_signal_resampled = sig.resample(ppg_signal, len(nir_img_array))
             ppg_time_resampled = np.linspace(ppg_time[0], ppg_time[-1], len(nir_img_array))
 
-            subject_name = os.path.basename(subject_npz_path).split('.')[0]
             data[subject_name] = (nir_img_array, ppg_signal_resampled)
 
         return data

@@ -16,6 +16,7 @@ class DeepPhysConfig:
     img_size_w: int = 640
     out_dim: int = 1
     bias: bool = True
+    dropout: float = 0.50
 
 
 class DeepPhys(nn.Module):
@@ -32,7 +33,7 @@ class DeepPhys(nn.Module):
 
         self.a_conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1)
         self.a_bn2 = nn.BatchNorm2d(32)
-        self.a_d1 = nn.Dropout2d(p=0.50)
+        self.a_d1 = nn.Dropout2d(p=config.dropout)
 
         self.a_softconv1 = nn.Conv2d(in_channels=32, out_channels=1, kernel_size=1, stride=1, padding=0, bias=config.bias)
         self.a_avgpool = nn.AvgPool2d(kernel_size=2, stride=2, padding=0)
@@ -41,7 +42,7 @@ class DeepPhys(nn.Module):
 
         self.a_conv4 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1, bias=config.bias)
         self.a_bn4 = nn.BatchNorm2d(64)
-        self.a_d2 = nn.Dropout2d(p=0.50)
+        self.a_d2 = nn.Dropout2d(p=config.dropout)
         self.a_softconv2 = nn.Conv2d(in_channels=64, out_channels=1, kernel_size=1, stride=1, padding=0, bias=config.bias)
 
         # Motion stream
@@ -49,14 +50,14 @@ class DeepPhys(nn.Module):
         self.m_bn1 = nn.BatchNorm2d(32)
         self.m_conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1, bias=config.bias)
         self.m_bn2 = nn.BatchNorm2d(32)
-        self.d1 = nn.Dropout2d(p=0.50)
+        self.d1 = nn.Dropout2d(p=config.dropout)
 
         self.m_avgpool1 = nn.AvgPool2d(kernel_size=2, stride=2, padding=0)
         self.m_conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=1, padding=1, bias=config.bias)
         self.m_bn3 = nn.BatchNorm2d(64)
         self.m_conv4 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1, bias=config.bias)
         self.m_bn4 = nn.BatchNorm2d(64)
-        self.d2 = nn.Dropout2d(p=0.50)
+        self.d2 = nn.Dropout2d(p=config.dropout)
         self.m_avgpool2 = nn.AvgPool2d(kernel_size=2, stride=2, padding=0)
 
         # Fully connected blocks
@@ -136,13 +137,41 @@ class DeepPhys(nn.Module):
 
         if ppg_signals is not None:
             # if we are given some desired targets also calculate the loss
-            if self.config.out_dim == 1:
-                # for differentiated ppg regression
-                labels = (ppg_signals[:, 1] - ppg_signals[:, 0]) / self.rppg_signals_diff_std
-                loss = F.mse_loss(logits, labels)
-            else:
-                pass  # TODO: for seq2seq
+            # for differentiated ppg regression
+            labels = (ppg_signals[:, 1] - ppg_signals[:, 0]) / self.rppg_signals_diff_std
+            loss = F.mse_loss(logits, labels)
         else:
             loss = None
 
         return logits, loss
+
+
+    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+        # start with all of the candidate parameters
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        # filter out those that do not require grad
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        # create optim groups.
+        # Example:
+        #   To make any parameters that is 2D will be weight decayed, otherwise no.
+        #   i.e. all weight tensors in matmuls + embeddings decay, all biases and batchnorms don't.
+        #   decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+        #   nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+        decay_params = [p for n, p in param_dict.items()]
+        nodecay_params = []
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': nodecay_params, 'weight_decay': 0.0}
+        ]
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+        # Create AdamW optimizer and use the fused version if it is available
+        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and device_type == 'cuda'
+        extra_args = dict(fused=True) if use_fused else dict()
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
+        print(f"using fused AdamW: {use_fused}")
+
+        return optimizer

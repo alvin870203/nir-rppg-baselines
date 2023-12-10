@@ -45,6 +45,10 @@ class Dummy(nn.Module):
                 labels = ppg_signals[:, 1] - ppg_signals[:, 0]
                 loss = F.mse_loss(logits, labels)
             else:
-                pass  # TODO: for seq2seq
+                # for seq2seq
+                labels = ppg_signals.squeeze()
+                loss = F.mse_loss(logits, labels)
+        else:
+            loss = None
 
         return logits, loss

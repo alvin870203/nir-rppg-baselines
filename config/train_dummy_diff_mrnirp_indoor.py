@@ -4,13 +4,18 @@
 dataset_name = 'MR-NIRP_Indoor'
 window_size = 2  # unit: frames
 window_stride = 1  # unit: frames
-img_size_h = 640
-img_size_w = 640
+img_size_h = 36
+img_size_w = 36
 video_fps = 30.
 ppg_fps = 60.
+train_list = (                       'Subject1_still_940', 'Subject2_motion_940', 'Subject2_still_940',
+              'Subject3_motion_940', 'Subject3_still_940', 'Subject4_motion_940', 'Subject4_still_940',
+                                     'Subject5_still_940', 'Subject6_motion_940', 'Subject6_still_940',
+              'Subject7_motion_940', 'Subject7_still_940', 'Subject8_motion_940', 'Subject8_still_940')
+val_list = ('Subject1_motion_940')
 
 # training related
-max_epochs = 50
+max_epochs = 10
 train_batch_size = 32
 
 # evaluation related
