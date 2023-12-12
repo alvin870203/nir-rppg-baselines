@@ -26,6 +26,10 @@ ppg_fps = 60
 train_list = ()
 val_list = ()
 test_list = ()
+test_window_size = 900  # unit: frames (30 seconds)
+test_window_stride = 900  # unit: frames (non-overlapping)
+max_heart_rate = 250  # unit: bpm
+min_heart_rate = 40  # unit: bpm
 # training related
 init_from = 'scratch'  # 'scratch' or 'resume'
 max_iters = 2
@@ -91,7 +95,11 @@ dataset_args = dict(
     ppg_fps=ppg_fps,
     train_list=train_list,
     val_list=val_list,
-    test_list=test_list
+    test_list=test_list,
+    test_window_size=test_window_size,
+    test_window_stride=test_window_stride,
+    max_heart_rate=max_heart_rate,
+    min_heart_rate=min_heart_rate
 )
 match dataset_name:
     case 'MR-NIRP_Indoor':
@@ -237,6 +245,16 @@ def estimate_loss():
     return out
 
 
+# generate heart rate & spectrum results
+def generate_result():
+    results = {}
+    for split, dataset in zip(['train', 'val'], [train_dataset, val_dataset]):
+        result = model.generate(dataset, device)
+        results[split] = result
+        np.savez(os.path.join(out_dir, f'{split}_result.npz'), **result)
+    return results
+
+
 # learning rate decay scheduler (cosine with warmup)
 def get_lr(iter):
     # 1) linear warmup for warmup_iters steps
@@ -303,6 +321,11 @@ while True:
                 }
                 tqdm.write(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+                results = generate_result()
+                for split, result in results.items():
+                    tqdm.write(f"results on {split} set:")
+                    for subject_name, subject_result in result.items():
+                        tqdm.write(f"  {subject_name}: BPM predict={subject_result['bpm_predicts']}, label={subject_result['bpm_labels']}")
     if iter_num == 0 and eval_only:
         break
 

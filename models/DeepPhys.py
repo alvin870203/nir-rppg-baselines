@@ -2,6 +2,7 @@ import math
 import inspect
 from dataclasses import dataclass
 import numpy as np
+import scipy.signal as sig
 
 from tqdm import tqdm
 import torch
@@ -61,7 +62,7 @@ class DeepPhys(nn.Module):
         self.m_avgpool2 = nn.AvgPool2d(kernel_size=2, stride=2, padding=0)
 
         # Fully connected blocks
-        self.d3 = nn.Dropout(p=0.25)
+        self.d3 = nn.Dropout(p=config.dropout / 2)
         self.fully1 = nn.Linear(in_features=64 * (self.config.img_size_h // 4) * (self.config.img_size_w // 4),
                                 out_features=128, bias=config.bias)
         self.fully2 = nn.Linear(in_features=128, out_features=config.out_dim, bias=config.bias)
@@ -146,6 +147,31 @@ class DeepPhys(nn.Module):
         return logits, loss
 
 
+    def get_num_params(self, non_embedding=True):
+        """
+        Return the number of parameters in the model.
+        """
+        n_params = sum(p.numel() for p in self.parameters())
+        return n_params
+
+
+    def _init_weights(self, module):
+        # FUTURE: implement this & more investigations around better init etc
+        # for example:
+        #   if isinstance(module, nn.Linear):
+        #       torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        #       if module.bias is not None:
+        #           torch.nn.init.zeros_(module.bias)
+        #   elif ...
+        raise NotImplementedError()
+
+
+    @classmethod
+    def from_pretrained(cls, model_type, override_args=None):
+        # FUTURE: implement this & init from pretrained
+        raise NotImplementedError()
+
+
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters
         param_dict = {pn: p for pn, p in self.named_parameters()}
@@ -175,3 +201,61 @@ class DeepPhys(nn.Module):
         print(f"using fused AdamW: {use_fused}")
 
         return optimizer
+
+
+    def estimate_mfu(self, fwdbwd_per_iter, dt):
+        """ estimate model flops utilization (MFU) in units of ,e.g., A100 bfloat16 peak FLOPS """
+        # FUTURE: implement this
+        raise NotImplementedError()
+
+
+    @torch.no_grad()
+    def generate(self, test_dataset: Dataset, device: str) -> dict[str, dict[str, np.ndarray]]:
+        """
+        Predict on test set, usually with non-overlapping windows of 30s
+        and calculate PPG figure, BPM error, and other frequency stuffs.
+        Most likely you'll want to make sure to be in model.eval() mode of operation for this.
+        """
+        result = {}  # {subject_name: {start_idxs, losses, ppg_predicts, ppg_labels, spectrum_predicts, spectrum_labels, bpm_predicts, bpm_labels}}
+        for subject_name, (start_idxs, bpm_labels, spectrum_labels) in test_dataset.test_data.items():
+            losses = []
+            ppg_predicts, ppg_labels = [], []
+            spectrum_predicts = []
+            bpm_predicts = []
+            nir_imgs, ppg_signals = test_dataset.data[subject_name]
+            ppg_predict_first = ppg_signals[0]
+            for start_idx, bpm_label in zip(start_idxs, bpm_labels):
+                # There's only (test_dataset.config.test_window_size - 1) windows in a test_window
+                start_idx_t0, end_idx_t0 = start_idx, start_idx + test_dataset.config.test_window_size - 1
+                start_idx_t1, end_idx_t1 = start_idx_t0 + 1, end_idx_t0 + 1
+                nir_imgs_torch = torch.stack((torch.from_numpy(nir_imgs[start_idx_t0 : end_idx_t0]),
+                                              torch.from_numpy(nir_imgs[start_idx_t1 : end_idx_t1])), dim=1).unsqueeze(2).float().to(device)
+                ppg_signals_torch = torch.stack((torch.from_numpy(ppg_signals[start_idx_t0 : end_idx_t0]),
+                                                 torch.from_numpy(ppg_signals[start_idx_t1 : end_idx_t1])), dim=1).unsqueeze(2).float().to(device)
+
+                logits, loss = self(nir_imgs_torch, ppg_signals_torch)
+
+                ppg_predict = torch.cumsum(logits.squeeze(), dim=0).cpu().numpy() * self.rppg_signals_diff_std
+                ppg_predict = np.concatenate((np.zeros(1), ppg_predict)) + ppg_predict_first  # Add last ppg_signals or ppg_signals[start_idx_t0] as bias
+                ppg_predict_first = ppg_predict[-1]
+                assert len(ppg_predict) == test_dataset.config.test_window_size, f"len of predicted ppg is not the same as ground truth ppg!"
+                ppg_predict_detrend = sig.detrend(ppg_predict)
+                spectrum_predict = np.abs(np.fft.rfft(ppg_predict_detrend))
+                freq = np.fft.rfftfreq(len(ppg_predict_detrend), d=1./test_dataset.config.video_fps)
+                freq_range = np.logical_and(freq <= test_dataset.config.max_heart_rate / 60, freq >= test_dataset.config.min_heart_rate / 60)
+                max_idx = np.argmax(spectrum_predict[freq_range])
+                max_freq = freq[freq_range][max_idx]
+                bpm_predict = max_freq * 60
+
+                losses.append(loss.item())
+                ppg_predicts.append(ppg_predict)
+                ppg_labels.append(ppg_signals[start_idx_t0 : end_idx_t1])
+                spectrum_predicts.append(spectrum_predict)
+                bpm_predicts.append(bpm_predict)
+
+            result[subject_name] = {'start_idxs': start_idxs, 'losses': np.array(losses),
+                                 'ppg_predicts': np.array(ppg_predicts), 'ppg_labels': np.array(ppg_labels),
+                                 'spectrum_predicts': np.array(spectrum_predicts), 'spectrum_labels': spectrum_labels,
+                                 'bpm_predicts': np.array(bpm_predicts), 'bpm_labels': bpm_labels}
+
+        return result
