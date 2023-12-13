@@ -32,21 +32,21 @@ class Dummy(nn.Module):
         )
 
 
-    def forward(self, nir_imgs: torch.Tensor, ppg_signals: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, nir_imgs: torch.Tensor, ppg_labels: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         # nir_imgs: (batch_size, window_size, 1, img_size_h, img_size_w)
-        # ppg_signals: (batch_size, window_size, 1)
+        # ppg_labels: (batch_size, window_size, 1)
 
         device = nir_imgs.device
         logits = self.model(nir_imgs[:, 1] - nir_imgs[:, 0])
-        if ppg_signals is not None:
+        if ppg_labels is not None:
             # if we are given some desired targets also calculate the loss
             if self.config.out_dim == 1:
                 # for differentiated ppg regression
-                labels = ppg_signals[:, 1] - ppg_signals[:, 0]
+                labels = ppg_labels[:, 1] - ppg_labels[:, 0]
                 loss = F.mse_loss(logits, labels)
             else:
                 # for seq2seq
-                labels = ppg_signals.squeeze()
+                labels = ppg_labels.squeeze()
                 loss = F.mse_loss(logits, labels)
         else:
             loss = None

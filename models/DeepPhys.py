@@ -25,7 +25,7 @@ class DeepPhys(nn.Module):
         super().__init__()
         self.config = config
 
-        self.rppg_signals_diff_std = self.get_rppg_signals_diff_std(train_dataset)
+        self.rppg_labels_diff_std = self.get_rppg_labels_diff_std(train_dataset)
 
         # Implementation by terbed/Deep-rPPG
         # Appearance stream
@@ -68,18 +68,18 @@ class DeepPhys(nn.Module):
         self.fully2 = nn.Linear(in_features=128, out_features=config.out_dim, bias=config.bias)
 
 
-    def get_rppg_signals_diff_std(self, train_dataset: Dataset) -> float:
-        rppg_signals_diff = []
-        for _, ppg_signals in train_dataset:
-            rppg_signals_diff.append((ppg_signals[1] - ppg_signals[0]))
-        rppg_signals_diff = np.concatenate(rppg_signals_diff)
-        # np.save("rppg_signals_diff.npy", rppg_signals_diff)  # For inspecting the distribution by test_MR-NIRP_Indoor_statistics.ipynb
-        return rppg_signals_diff.std()
+    def get_rppg_labels_diff_std(self, train_dataset: Dataset) -> float:
+        rppg_labels_diff = []
+        for _, ppg_labels in train_dataset:
+            rppg_labels_diff.append((ppg_labels[1] - ppg_labels[0]))
+        rppg_labels_diff = np.concatenate(rppg_labels_diff)
+        # np.save("rppg_signals_diff.npy", rppg_labels_diff)  # For inspecting the distribution by test_MR-NIRP_Indoor_statistics.ipynb
+        return rppg_labels_diff.std()
 
 
-    def forward(self, nir_imgs: torch.Tensor, ppg_signals: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, nir_imgs: torch.Tensor, ppg_labels: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         # nir_imgs: (batch_size, window_size, 1, img_size_h, img_size_w)
-        # ppg_signals: (batch_size, window_size, 1)
+        # ppg_labels: (batch_size, window_size, 1)
 
         device = nir_imgs.device
 
@@ -136,10 +136,10 @@ class DeepPhys(nn.Module):
         logits = self.fully2(out)
 
 
-        if ppg_signals is not None:
+        if ppg_labels is not None:
             # if we are given some desired targets also calculate the loss
             # for differentiated ppg regression
-            labels = (ppg_signals[:, 1] - ppg_signals[:, 0]) / self.rppg_signals_diff_std
+            labels = (ppg_labels[:, 1] - ppg_labels[:, 0]) / self.rppg_labels_diff_std
             loss = F.mse_loss(logits, labels)
         else:
             loss = None
@@ -222,21 +222,21 @@ class DeepPhys(nn.Module):
             ppg_predicts, ppg_labels = [], []
             spectrum_predicts = []
             bpm_predicts = []
-            nir_imgs, ppg_signals = test_dataset.data[subject_name]
-            ppg_predict_first = ppg_signals[0]
+            nir_imgs, ppg_label = test_dataset.data[subject_name]
+            ppg_predict_first = ppg_label[0]
             for start_idx, bpm_label in zip(start_idxs, bpm_labels):
                 # There's only (test_dataset.config.test_window_size - 1) windows in a test_window
                 start_idx_t0, end_idx_t0 = start_idx, start_idx + test_dataset.config.test_window_size - 1
                 start_idx_t1, end_idx_t1 = start_idx_t0 + 1, end_idx_t0 + 1
                 nir_imgs_torch = torch.stack((torch.from_numpy(nir_imgs[start_idx_t0 : end_idx_t0]),
                                               torch.from_numpy(nir_imgs[start_idx_t1 : end_idx_t1])), dim=1).unsqueeze(2).float().to(device)
-                ppg_signals_torch = torch.stack((torch.from_numpy(ppg_signals[start_idx_t0 : end_idx_t0]),
-                                                 torch.from_numpy(ppg_signals[start_idx_t1 : end_idx_t1])), dim=1).unsqueeze(2).float().to(device)
+                ppg_labels_torch = torch.stack((torch.from_numpy(ppg_label[start_idx_t0 : end_idx_t0]),
+                                                 torch.from_numpy(ppg_label[start_idx_t1 : end_idx_t1])), dim=1).unsqueeze(2).float().to(device)
 
-                logits, loss = self(nir_imgs_torch, ppg_signals_torch)
+                logits, loss = self(nir_imgs_torch, ppg_labels_torch)
 
-                ppg_predict = torch.cumsum(logits.squeeze(), dim=0).cpu().numpy() * self.rppg_signals_diff_std
-                ppg_predict = np.concatenate((np.zeros(1), ppg_predict)) + ppg_predict_first  # Add last ppg_signals or ppg_signals[start_idx_t0] as bias
+                ppg_predict = torch.cumsum(logits.squeeze(), dim=0).cpu().numpy() * self.rppg_labels_diff_std
+                ppg_predict = np.concatenate((np.zeros(1), ppg_predict)) + ppg_predict_first  # Add last ppg_predict or ppg_labels[start_idx_t0] as bias
                 ppg_predict_first = ppg_predict[-1]
                 assert len(ppg_predict) == test_dataset.config.test_window_size, f"len of predicted ppg is not the same as ground truth ppg!"
                 ppg_predict_detrend = sig.detrend(ppg_predict)
@@ -249,13 +249,13 @@ class DeepPhys(nn.Module):
 
                 losses.append(loss.item())
                 ppg_predicts.append(ppg_predict)
-                ppg_labels.append(ppg_signals[start_idx_t0 : end_idx_t1])
+                ppg_labels.append(ppg_label[start_idx_t0 : end_idx_t1])
                 spectrum_predicts.append(spectrum_predict)
                 bpm_predicts.append(bpm_predict)
 
             result[subject_name] = {'start_idxs': start_idxs, 'losses': np.array(losses),
-                                 'ppg_predicts': np.array(ppg_predicts), 'ppg_labels': np.array(ppg_labels),
-                                 'spectrum_predicts': np.array(spectrum_predicts), 'spectrum_labels': spectrum_labels,
-                                 'bpm_predicts': np.array(bpm_predicts), 'bpm_labels': bpm_labels}
+                                    'ppg_predicts': np.array(ppg_predicts), 'ppg_labels': np.array(ppg_label),
+                                    'spectrum_predicts': np.array(spectrum_predicts), 'spectrum_labels': spectrum_labels,
+                                    'bpm_predicts': np.array(bpm_predicts), 'bpm_labels': bpm_labels}
 
         return result

@@ -230,15 +230,15 @@ def estimate_loss():
     model.eval()
     for split, loader in zip(['train', 'val'], [train_dataloader, val_dataloader]):
         losses = torch.zeros(len(loader))
-        for batch_idx, (nir_imgs, ppg_signals) in enumerate(loader):
+        for batch_idx, (nir_imgs, ppg_labels) in enumerate(loader):
             if device_type == 'cuda':
-                # pin arrays nir_imgs,ppg_signals, which allows us to move them to GPU asynchronously (non_blocking=True)
+                # pin arrays nir_imgs,ppg_labels, which allows us to move them to GPU asynchronously (non_blocking=True)
                 nir_imgs = nir_imgs.to(device, non_blocking=True)
-                ppg_signals = ppg_signals.to(device, non_blocking=True)
+                ppg_labels = ppg_labels.to(device, non_blocking=True)
             else:
-                nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
+                nir_imgs, ppg_labels = nir_imgs.to(device), ppg_labels.to(device)
             with ctx:
-                logits, loss = model(nir_imgs, ppg_signals)
+                logits, loss = model(nir_imgs, ppg_labels)
             losses[batch_idx] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -277,13 +277,13 @@ if wandb_log:
 
 # training loop
 train_dataiter = iter(train_dataloader)
-nir_imgs, ppg_signals = next(train_dataiter)  # fetch the very first batch
+nir_imgs, ppg_labels = next(train_dataiter)  # fetch the very first batch
 if device_type == 'cuda':
-    # pin arrays nir_imgs,ppg_signals, which allows us to move them to GPU asynchronously (non_blocking=True)
+    # pin arrays nir_imgs,ppg_labels, which allows us to move them to GPU asynchronously (non_blocking=True)
     nir_imgs = nir_imgs.to(device, non_blocking=True)
-    ppg_signals = ppg_signals.to(device, non_blocking=True)
+    ppg_labels = ppg_labels.to(device, non_blocking=True)
 else:
-    nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
+    nir_imgs, ppg_labels = nir_imgs.to(device), ppg_labels.to(device)
 t0 = time.time()
 local_iter_num = 0  # number of iters in the lifetime of this process
 pbar = tqdm(total=max_iters, initial=iter_num, dynamic_ncols=True)
@@ -334,21 +334,21 @@ while True:
     # and using the GradScaler if data type is float16
     for micro_step in range(gradient_accumulation_steps):
         with ctx:
-            logits, loss = model(nir_imgs, ppg_signals)
+            logits, loss = model(nir_imgs, ppg_labels)
             loss = loss / gradient_accumulation_steps  # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         # and re-init iterator if needed
         try:
-            nir_imgs, ppg_signals = next(train_dataiter)
+            nir_imgs, ppg_labels = next(train_dataiter)
         except StopIteration:
             train_dataiter = iter(train_dataloader)
-            nir_imgs, ppg_signals = next(train_dataiter)
+            nir_imgs, ppg_labels = next(train_dataiter)
         if device_type == 'cuda':
-            # pin arrays nir_imgs,ppg_signals, which allows us to move them to GPU asynchronously (non_blocking=True)
+            # pin arrays nir_imgs,ppg_labels, which allows us to move them to GPU asynchronously (non_blocking=True)
             nir_imgs = nir_imgs.to(device, non_blocking=True)
-            ppg_signals = ppg_signals.to(device, non_blocking=True)
+            ppg_labels = ppg_labels.to(device, non_blocking=True)
         else:
-            nir_imgs, ppg_signals = nir_imgs.to(device), ppg_signals.to(device)
+            nir_imgs, ppg_labels = nir_imgs.to(device), ppg_labels.to(device)
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
     # clip the gradient
