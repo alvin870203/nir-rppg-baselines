@@ -17,3 +17,11 @@ RUN yes | unminimize 2>&1 \
 # [Optional] Uncomment this section to install additional OS packages.
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
+
+# Install dlib with cuda support (for face_recognition python package)
+RUN git clone -b 'v19.21' --single-branch https://github.com/davisking/dlib.git dlib/ \
+    && mkdir -p dlib/build \
+    && cmake -Hdlib -Bdlib/build -DDLIB_USE_CUDA=1 -DUSE_AVX_INSTRUCTIONS=1 \
+    && cmake --build dlib/build -- -j16 \
+    && cd dlib \
+    && python3 setup.py install --set BUILD_SHARED_LIBS=OFF

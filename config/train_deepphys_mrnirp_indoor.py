@@ -15,6 +15,8 @@ train_list = (                       'Subject1_still_940', 'Subject2_motion_940'
                                      'Subject5_still_940', 'Subject6_motion_940', 'Subject6_still_940',
               'Subject7_motion_940', 'Subject7_still_940', 'Subject8_motion_940', 'Subject8_still_940')
 val_list = ('Subject1_motion_940')
+crop_face_type = 'video_fist'  # 'no', 'video_fist', 'window_first', 'every'
+bbox_scale = 1.6
 
 # training related
 # the number of examples per iter:
@@ -40,7 +42,7 @@ always_save_checkpoint = False  # we expect to overfit on this small dataset, so
 # model related
 model_name = 'DeepPhys'
 out_dim = 1
-bias = False
+bias = True
 dropout = 0.50
 
 # optimizer related

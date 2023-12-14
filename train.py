@@ -30,6 +30,8 @@ test_window_size = 900  # unit: frames (30 seconds)
 test_window_stride = 900  # unit: frames (non-overlapping)
 max_heart_rate = 250  # unit: bpm
 min_heart_rate = 40  # unit: bpm
+crop_face_type = 'no'  # 'no', 'video_fist', 'window_first', 'every'
+bbox_scale = 1.6
 # training related
 init_from = 'scratch'  # 'scratch' or 'resume'
 max_iters = 2
@@ -99,7 +101,9 @@ dataset_args = dict(
     test_window_size=test_window_size,
     test_window_stride=test_window_stride,
     max_heart_rate=max_heart_rate,
-    min_heart_rate=min_heart_rate
+    min_heart_rate=min_heart_rate,
+    crop_face_type=crop_face_type,
+    bbox_scale=bbox_scale
 )
 match dataset_name:
     case 'MR-NIRP_Indoor':
@@ -239,8 +243,8 @@ def estimate_loss():
                 nir_imgs, ppg_labels = nir_imgs.to(device), ppg_labels.to(device)
             with ctx:
                 logits, loss = model(nir_imgs, ppg_labels)
-            losses[batch_idx] = loss.item()
-        out[split] = losses.mean()
+            losses[batch_idx] = loss.item() * nir_imgs.shape[0]  # scale up to undo the mean reduction
+        out[split] = losses.sum() / len(loader.sampler)
     model.train()
     return out
 
@@ -332,6 +336,7 @@ while True:
 
     # forward backward update, with optional gradient accumulation to simulate larger batch size
     # and using the GradScaler if data type is float16
+    model.train()
     for micro_step in range(gradient_accumulation_steps):
         with ctx:
             logits, loss = model(nir_imgs, ppg_labels)

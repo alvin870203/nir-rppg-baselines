@@ -10,6 +10,8 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import Dataset
 
+from utils.preprocess import pad_crop_resize
+
 
 @dataclass
 class DeepPhysConfig:
@@ -163,13 +165,13 @@ class DeepPhys(nn.Module):
         #       if module.bias is not None:
         #           torch.nn.init.zeros_(module.bias)
         #   elif ...
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
     @classmethod
     def from_pretrained(cls, model_type, override_args=None):
         # FUTURE: implement this & init from pretrained
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
@@ -206,7 +208,7 @@ class DeepPhys(nn.Module):
     def estimate_mfu(self, fwdbwd_per_iter, dt):
         """ estimate model flops utilization (MFU) in units of ,e.g., A100 bfloat16 peak FLOPS """
         # FUTURE: implement this
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
     @torch.no_grad()
@@ -214,24 +216,58 @@ class DeepPhys(nn.Module):
         """
         Predict on test set, usually with non-overlapping windows of 30s
         and calculate PPG figure, BPM error, and other frequency stuffs.
-        Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
+        # Most likely you'll want to make sure to be in model.eval() mode of operation for this.
+        self.eval()
+
         result = {}  # {subject_name: {start_idxs, losses, ppg_predicts, ppg_labels, spectrum_predicts, spectrum_labels, bpm_predicts, bpm_labels}}
         for subject_name, (start_idxs, bpm_labels, spectrum_labels) in test_dataset.test_data.items():
             losses = []
-            ppg_predicts, ppg_labels = [], []
+            ppg_predicts, ppg_labels_reshape = [], []
             spectrum_predicts = []
             bpm_predicts = []
-            nir_imgs, ppg_label = test_dataset.data[subject_name]
-            ppg_predict_first = ppg_label[0]
+            nir_imgs = test_dataset.data[subject_name]["nir_imgs"]
+            ppg_labels = test_dataset.data[subject_name]["ppg_labels"]
+            face_locations = test_dataset.data[subject_name]["face_locations"]
+            ppg_predict_first = ppg_labels[0]
             for start_idx, bpm_label in zip(start_idxs, bpm_labels):
                 # There's only (test_dataset.config.test_window_size - 1) windows in a test_window
                 start_idx_t0, end_idx_t0 = start_idx, start_idx + test_dataset.config.test_window_size - 1
                 start_idx_t1, end_idx_t1 = start_idx_t0 + 1, end_idx_t0 + 1
-                nir_imgs_torch = torch.stack((torch.from_numpy(nir_imgs[start_idx_t0 : end_idx_t0]),
-                                              torch.from_numpy(nir_imgs[start_idx_t1 : end_idx_t1])), dim=1).unsqueeze(2).float().to(device)
-                ppg_labels_torch = torch.stack((torch.from_numpy(ppg_label[start_idx_t0 : end_idx_t0]),
-                                                 torch.from_numpy(ppg_label[start_idx_t1 : end_idx_t1])), dim=1).unsqueeze(2).float().to(device)
+                if test_dataset.config.crop_face_type == 'no':
+                    nir_imgs_t0 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
+                                                            face_location=None, bbox_scale=None)
+                                            for nir_img in nir_imgs[start_idx_t0 : end_idx_t0]])
+                    nir_imgs_t1 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
+                                                            face_location=None, bbox_scale=None)
+                                            for nir_img in nir_imgs[start_idx_t1 : end_idx_t1]])
+                elif test_dataset.config.crop_face_type == 'video_first':
+                    nir_imgs_t0 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
+                                                            face_location=face_locations[0], bbox_scale=test_dataset.config.bbox_scale)
+                                            for nir_img in nir_imgs[start_idx_t0 : end_idx_t0]])
+                    nir_imgs_t1 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
+                                                            face_location=face_locations[0], bbox_scale=test_dataset.config.bbox_scale)
+                                            for nir_img in nir_imgs[start_idx_t1 : end_idx_t1]])
+                elif test_dataset.config.crop_face_type == 'window_first':
+                    nir_imgs_t0 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
+                                                            face_location=face_location, bbox_scale=test_dataset.config.bbox_scale)
+                                            for nir_img, face_location in zip(nir_imgs[start_idx_t0 : end_idx_t0], face_locations[start_idx_t0 : end_idx_t0])])
+                    nir_imgs_t1 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
+                                                            face_location=face_location, bbox_scale=test_dataset.config.bbox_scale)
+                                            for nir_img, face_location in zip(nir_imgs[start_idx_t1 : end_idx_t1], face_locations[start_idx_t0 : end_idx_t0])])
+                elif test_dataset.config.crop_face_type == 'every':
+                    nir_imgs_t0 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
+                                                            face_location=face_location, bbox_scale=test_dataset.config.bbox_scale)
+                                            for nir_img, face_location in zip(nir_imgs[start_idx_t0 : end_idx_t0], face_locations[start_idx_t0 : end_idx_t0])])
+                    nir_imgs_t1 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
+                                                            face_location=face_location, bbox_scale=test_dataset.config.bbox_scale)
+                                            for nir_img, face_location in zip(nir_imgs[start_idx_t1 : end_idx_t1], face_locations[start_idx_t1 : end_idx_t1])])
+                else:
+                    raise NotImplementedError
+                nir_imgs_torch = torch.stack((torch.from_numpy(nir_imgs_t0),
+                                              torch.from_numpy(nir_imgs_t1)), dim=1).unsqueeze(2).float().to(device)
+                ppg_labels_torch = torch.stack((torch.from_numpy(ppg_labels[start_idx_t0 : end_idx_t0]),
+                                                torch.from_numpy(ppg_labels[start_idx_t1 : end_idx_t1])), dim=1).unsqueeze(2).float().to(device)
 
                 logits, loss = self(nir_imgs_torch, ppg_labels_torch)
 
@@ -249,13 +285,13 @@ class DeepPhys(nn.Module):
 
                 losses.append(loss.item())
                 ppg_predicts.append(ppg_predict)
-                ppg_labels.append(ppg_label[start_idx_t0 : end_idx_t1])
+                ppg_labels_reshape.append(ppg_labels[start_idx_t0 : end_idx_t1])
                 spectrum_predicts.append(spectrum_predict)
                 bpm_predicts.append(bpm_predict)
 
             result[subject_name] = {'start_idxs': start_idxs, 'losses': np.array(losses),
-                                    'ppg_predicts': np.array(ppg_predicts), 'ppg_labels': np.array(ppg_label),
+                                    'ppg_predicts': np.array(ppg_predicts), 'ppg_labels': np.array(ppg_labels_reshape),
                                     'spectrum_predicts': np.array(spectrum_predicts), 'spectrum_labels': spectrum_labels,
                                     'bpm_predicts': np.array(bpm_predicts), 'bpm_labels': bpm_labels}
-
+        self.train()
         return result
