@@ -178,7 +178,6 @@ match model_name:
         )  # start with model_args from command line
         if init_from == 'scratch':
             # init a new model from scratch
-            print(f"Initializing a new {model_name} model from scratch")
             model_config = DeepPhysConfig(**model_args)
             model = DeepPhys(model_config, train_dataset)
         elif init_from == 'resume':

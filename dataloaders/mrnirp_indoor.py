@@ -129,28 +129,21 @@ class MRNIRPIndoorDataset(Dataset):
         # ppg_labels: (batch_size, window_size, 1)
         subject_name, start_idx = self.window_list[idx]
         nir_imgs = []
+        bbox_scale = self.config.bbox_scale if self.config.crop_face_type != 'no' else None
         for i, nir_img in enumerate(self.data[subject_name]['nir_imgs'][start_idx : start_idx + self.config.window_size]):
             if self.config.crop_face_type == 'no':
-                nir_img = pad_crop_resize(nir_img, resize_wh=(self.config.img_size_w, self.config.img_size_h),
-                                          face_location=None, bbox_scale=None)
-                nir_imgs.append(nir_img[np.newaxis, ...])
+                face_location = None
             elif self.config.crop_face_type == 'video_first':
                 face_location = self.data[subject_name]['face_locations'][0]
-                nir_img = pad_crop_resize(nir_img, resize_wh=(self.config.img_size_w, self.config.img_size_h),
-                                          face_location=face_location, bbox_scale=self.config.bbox_scale)
-                nir_imgs.append(nir_img[np.newaxis, ...])
             elif self.config.crop_face_type == 'window_first':
                 face_location = self.data[subject_name]['face_locations'][start_idx]
-                nir_img = pad_crop_resize(nir_img, resize_wh=(self.config.img_size_w, self.config.img_size_h),
-                                          face_location=face_location, bbox_scale=self.config.bbox_scale)
-                nir_imgs.append(nir_img[np.newaxis, ...])
             elif self.config.crop_face_type == 'every':
                 face_location = self.data[subject_name]['face_locations'][start_idx + i]
-                nir_img = pad_crop_resize(nir_img, resize_wh=(self.config.img_size_w, self.config.img_size_h),
-                                          face_location=face_location, bbox_scale=self.config.bbox_scale)
-                nir_imgs.append(nir_img[np.newaxis, ...])
             else:
                 raise NotImplementedError
+            nir_img = pad_crop_resize(nir_img, resize_wh=(self.config.img_size_w, self.config.img_size_h),
+                                    face_location=face_location, bbox_scale=bbox_scale)
+            nir_imgs.append(nir_img[np.newaxis, ...])
         nir_imgs = np.stack(nir_imgs, axis=0)
         # TODO: Add augmentation
         # NOTE: torch.from_numpy does not copy the data, be aware of this if you don't want to modify the data in-place.

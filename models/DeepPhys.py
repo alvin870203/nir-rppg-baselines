@@ -234,36 +234,31 @@ class DeepPhys(nn.Module):
                 # There's only (test_dataset.config.test_window_size - 1) windows in a test_window
                 start_idx_t0, end_idx_t0 = start_idx, start_idx + test_dataset.config.test_window_size - 1
                 start_idx_t1, end_idx_t1 = start_idx_t0 + 1, end_idx_t0 + 1
-                if test_dataset.config.crop_face_type == 'no':
-                    nir_imgs_t0 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
-                                                            face_location=None, bbox_scale=None)
-                                            for nir_img in nir_imgs[start_idx_t0 : end_idx_t0]])
-                    nir_imgs_t1 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
-                                                            face_location=None, bbox_scale=None)
-                                            for nir_img in nir_imgs[start_idx_t1 : end_idx_t1]])
-                elif test_dataset.config.crop_face_type == 'video_first':
-                    nir_imgs_t0 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
-                                                            face_location=face_locations[0], bbox_scale=test_dataset.config.bbox_scale)
-                                            for nir_img in nir_imgs[start_idx_t0 : end_idx_t0]])
-                    nir_imgs_t1 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
-                                                            face_location=face_locations[0], bbox_scale=test_dataset.config.bbox_scale)
-                                            for nir_img in nir_imgs[start_idx_t1 : end_idx_t1]])
-                elif test_dataset.config.crop_face_type == 'window_first':
-                    nir_imgs_t0 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
-                                                            face_location=face_location, bbox_scale=test_dataset.config.bbox_scale)
-                                            for nir_img, face_location in zip(nir_imgs[start_idx_t0 : end_idx_t0], face_locations[start_idx_t0 : end_idx_t0])])
-                    nir_imgs_t1 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
-                                                            face_location=face_location, bbox_scale=test_dataset.config.bbox_scale)
-                                            for nir_img, face_location in zip(nir_imgs[start_idx_t1 : end_idx_t1], face_locations[start_idx_t0 : end_idx_t0])])
-                elif test_dataset.config.crop_face_type == 'every':
-                    nir_imgs_t0 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
-                                                            face_location=face_location, bbox_scale=test_dataset.config.bbox_scale)
-                                            for nir_img, face_location in zip(nir_imgs[start_idx_t0 : end_idx_t0], face_locations[start_idx_t0 : end_idx_t0])])
-                    nir_imgs_t1 = np.array([pad_crop_resize(nir_img, resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
-                                                            face_location=face_location, bbox_scale=test_dataset.config.bbox_scale)
-                                            for nir_img, face_location in zip(nir_imgs[start_idx_t1 : end_idx_t1], face_locations[start_idx_t1 : end_idx_t1])])
-                else:
-                    raise NotImplementedError
+                nir_imgs_t0, nir_imgs_t1 = [], []
+                bbox_scale = test_dataset.config.bbox_scale if test_dataset.config.crop_face_type != 'no' else None
+                for idx_t0, idx_t1 in zip(range(start_idx_t0, end_idx_t0), range(start_idx_t1, end_idx_t1)):
+                    if test_dataset.config.crop_face_type == 'no':
+                        face_location_t0 = None
+                        face_location_t1 = None
+                    elif test_dataset.config.crop_face_type == 'video_first':
+                        face_location_t0 = face_locations[0]
+                        face_location_t1 = face_locations[0]
+                    elif test_dataset.config.crop_face_type == 'window_first':
+                        face_location_t0 = face_locations[idx_t0]
+                        face_location_t1 = face_locations[idx_t0]
+                    elif test_dataset.config.crop_face_type == 'every':
+                        face_location_t0 = face_locations[idx_t0]
+                        face_location_t1 = face_locations[idx_t1]
+                    else:
+                        raise NotImplementedError
+                    nir_img_t0 = pad_crop_resize(nir_imgs[idx_t0], resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
+                                                 face_location=face_location_t0, bbox_scale=bbox_scale)
+                    nir_img_t1 = pad_crop_resize(nir_imgs[idx_t1], resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
+                                                 face_location=face_location_t1, bbox_scale=bbox_scale)
+                    nir_imgs_t0.append(nir_img_t0)
+                    nir_imgs_t1.append(nir_img_t1)
+                nir_imgs_t0 = np.stack(nir_imgs_t0, axis=0)
+                nir_imgs_t1 = np.stack(nir_imgs_t1, axis=0)
                 nir_imgs_torch = torch.stack((torch.from_numpy(nir_imgs_t0),
                                               torch.from_numpy(nir_imgs_t1)), dim=1).unsqueeze(2).float().to(device)
                 ppg_labels_torch = torch.stack((torch.from_numpy(ppg_labels[start_idx_t0 : end_idx_t0]),
