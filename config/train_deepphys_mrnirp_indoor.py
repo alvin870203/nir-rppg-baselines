@@ -18,6 +18,13 @@ val_list = ('Subject1_motion_940')
 crop_face_type = 'video_first'  # 'no', 'video_fist', 'window_first', 'every'
 bbox_scale = 1.6
 
+# transform related
+window_hflip_p = 0.5
+frame_shift = 0.01  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
+frame_shift_p = 0.2  # probability of applying random bbox shift
+frame_scale_range = (0.99, 1.01)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
+frame_scale_p = 0.2  # probability of applying random bbox scale
+
 # training related
 # the number of examples per iter:
 # 128 batch_size * 1 grad_accum = 128 clips/iter
@@ -58,3 +65,4 @@ min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10
 
 # system related
 compile = False
+# num_workers = 1

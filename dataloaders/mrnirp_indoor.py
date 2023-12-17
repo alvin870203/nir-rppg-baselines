@@ -7,12 +7,16 @@ import scipy.signal as sig
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from tqdm import tqdm
+from typing import Callable
 
 import torch
+import torch.nn as nn
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
+from torchvision.transforms import v2
+from torchvision.transforms.v2 import Transform
 
-from utils.preprocess import pad_crop_resize
+from transforms.frame_transforms import FrameTransformConfig, FrameTransform
 
 
 @dataclass
@@ -20,8 +24,8 @@ class MRNIRPIndoorDatasetConfig:
     dataset_root_path: str = '/mnt/Data/MR-NIRP_Indoor/'
     window_size: int = 2  # unit: frames
     window_stride: int = 1  # unit: frames
-    img_size_h: int = 640
-    img_size_w: int = 640
+    img_size_h: int = 128
+    img_size_w: int = 128
     video_fps: float = 30.
     ppg_fps: float = 60.
     train_list: tuple[str] = ()
@@ -31,18 +35,29 @@ class MRNIRPIndoorDatasetConfig:
     test_window_stride: int = 900  # unit: frames (non-overlapping)
     max_heart_rate: int = 250  # unit: bpm
     min_heart_rate: int = 40  # unit: bpm
-    crop_face_type: str = 'video_first'  # 'no', 'video_first', 'window_first', 'every'
+    crop_face_type: str = 'no'  # 'no', 'video_first', 'window_first', 'every'
     bbox_scale: float = 1.6
 
 
 class MRNIRPIndoorDataset(Dataset):
-    def __init__(self, config: MRNIRPIndoorDatasetConfig, split: str) -> None:
+    def __init__(self, config: MRNIRPIndoorDatasetConfig, split: str,
+                 video_transform: None | nn.Module = None, window_transform: None | nn.Module = None, frame_transform: None | nn.Module = None) -> None:
         assert split in ['train', 'val', 'test']
         self.config = config
         self.split = split
+        self.video_transform = video_transform
+        self.window_transform = window_transform
+        self.frame_transform = frame_transform
         self.data = self.load_data()  # dict of {subject_name: {nir_img_array, ppg_labels, face_locations}}
         self.window_list = self.get_window_list()  # list of (subject_name, start_idx)
         self.test_data = self.get_test_data()  # dict of {subject_name: (start_idx_array, bpm_array)}
+        self.window_transform = window_transform
+        if frame_transform is not None:
+            self.frame_transform = frame_transform
+        else:
+            self.frame_transform = FrameTransform(FrameTransformConfig(img_size_h=config.img_size_h,
+                                                                       img_size_w=config.img_size_w,
+                                                                       bbox_scale=config.bbox_scale))
 
 
     def load_data(self) -> dict[str, dict[str, np.ndarray]]:
@@ -69,6 +84,9 @@ class MRNIRPIndoorDataset(Dataset):
             # Resample ppg_labels to the same size as nir_path_list
             ppg_labels_resampled = sig.resample(ppg_labels, len(nir_imgs))
             ppg_time_resampled = np.linspace(ppg_time[0], ppg_time[-1], len(nir_imgs))
+
+            if self.video_transform is not None:
+                pass  # TODO: Video-level transform
 
             data[subject_name] = {"nir_imgs": nir_imgs, "ppg_labels": ppg_labels_resampled, "face_locations": face_locations}
 
@@ -129,8 +147,9 @@ class MRNIRPIndoorDataset(Dataset):
         # ppg_labels: (batch_size, window_size, 1)
         subject_name, start_idx = self.window_list[idx]
         nir_imgs = []
-        bbox_scale = self.config.bbox_scale if self.config.crop_face_type != 'no' else None
-        for i, nir_img in enumerate(self.data[subject_name]['nir_imgs'][start_idx : start_idx + self.config.window_size]):
+        ppg_labels = []
+        for i, (nir_img, ppg_label) in enumerate(zip(self.data[subject_name]['nir_imgs'][start_idx : start_idx + self.config.window_size],
+                                                     self.data[subject_name]['ppg_labels'][start_idx : start_idx + self.config.window_size])):
             if self.config.crop_face_type == 'no':
                 face_location = None
             elif self.config.crop_face_type == 'video_first':
@@ -141,12 +160,22 @@ class MRNIRPIndoorDataset(Dataset):
                 face_location = self.data[subject_name]['face_locations'][start_idx + i]
             else:
                 raise NotImplementedError
-            nir_img = pad_crop_resize(nir_img, resize_wh=(self.config.img_size_w, self.config.img_size_h),
-                                    face_location=face_location, bbox_scale=bbox_scale)
-            nir_imgs.append(nir_img[np.newaxis, ...])
-        nir_imgs = np.stack(nir_imgs, axis=0)
-        # TODO: Add augmentation
+            nir_img = torch.from_numpy(nir_img[np.newaxis, ...]).float()
+            ppg_label = torch.tensor([ppg_label]).float()
+            nir_img, ppg_label = self.frame_transform(nir_img, ppg_label, face_location=face_location)
+            nir_imgs.append(nir_img)
+            ppg_labels.append(ppg_label)
         # NOTE: torch.from_numpy does not copy the data, be aware of this if you don't want to modify the data in-place.
-        nir_imgs = torch.from_numpy(nir_imgs).float()
-        ppg_labels = torch.from_numpy(self.data[subject_name]['ppg_labels'][start_idx : start_idx + self.config.window_size, np.newaxis]).float()
+        nir_imgs = torch.stack(nir_imgs, axis=0)
+        ppg_labels = torch.stack(ppg_labels, axis=0)
+
+        if self.window_transform is not None:
+            nir_imgs, ppg_labels = self.window_transform(nir_imgs, ppg_labels)
+
+        # Visualization for debug
+        # if self.split == 'val':
+        #     for i, nir_img in enumerate(nir_imgs[:, 0]):
+        #         cv2.imshow(f'nir_imgs{i}', nir_img.numpy())
+        #     cv2.waitKey(0)
+
         return nir_imgs, ppg_labels

@@ -11,6 +11,8 @@ from tqdm import tqdm
 from dataloaders.mrnirp_indoor import MRNIRPIndoorDatasetConfig, MRNIRPIndoorDataset
 from models.Dummy import DummyConfig, Dummy
 from models.DeepPhys import DeepPhysConfig, DeepPhys
+from transforms.window_transforms import WindowTransformConfig, WindowTransform
+from transforms.frame_transforms import FrameTransformConfig, FrameTransform
 
 
 # -----------------------------------------------------------------------------
@@ -31,7 +33,13 @@ test_window_stride = 900  # unit: frames (non-overlapping)
 max_heart_rate = 250  # unit: bpm
 min_heart_rate = 40  # unit: bpm
 crop_face_type = 'no'  # 'no', 'video_fist', 'window_first', 'every'
-bbox_scale = 1.6
+bbox_scale = 1.
+# transform related
+window_hflip_p = 0.5
+frame_shift = 0.01  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
+frame_shift_p = 0.2  # probability of applying random bbox shift
+frame_scale_range = (0.99, 1.01)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
+frame_scale_p = 0.2  # probability of applying random bbox scale
 # training related
 init_from = 'scratch'  # 'scratch' or 'resume'
 max_iters = 2
@@ -86,6 +94,28 @@ ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torc
 ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
 
+# transform
+frame_transform_args = dict(
+    img_size_h=img_size_h,
+    img_size_w=img_size_w,
+    bbox_scale=bbox_scale,
+    frame_shift=frame_shift,
+    frame_shift_p=frame_shift_p,
+    frame_scale_range=frame_scale_range,
+    frame_scale_p=frame_scale_p
+)
+frame_transform_config = FrameTransformConfig(**frame_transform_args)
+frame_transform = FrameTransform(frame_transform_config)
+
+window_transform_args = dict(
+    img_size_h=img_size_h,
+    img_size_w=img_size_w,
+    window_hflip_p=window_hflip_p
+)
+window_transform_config = WindowTransformConfig(**window_transform_args)
+window_transform = WindowTransform(window_transform_config)
+
+
 # dataloader
 dataset_args = dict(
     dataset_root_path=os.path.join('data', dataset_name),
@@ -108,7 +138,9 @@ dataset_args = dict(
 match dataset_name:
     case 'MR-NIRP_Indoor':
         dataset_config = MRNIRPIndoorDatasetConfig(**dataset_args)
-        train_dataset = MRNIRPIndoorDataset(dataset_config, 'train')
+        train_dataset = MRNIRPIndoorDataset(dataset_config, 'train',
+                                            window_transform=window_transform,
+                                            frame_transform=frame_transform)
         val_dataset = MRNIRPIndoorDataset(dataset_config, 'val')
         train_dataloader = DataLoader(train_dataset,
                                       batch_size=train_batch_size,
@@ -174,7 +206,8 @@ match model_name:
             img_size_w=img_size_w,
             out_dim=out_dim,
             bias=bias,
-            dropout=dropout
+            dropout=dropout,
+            bbox_scale=bbox_scale  # TODO: move test data loading to dataloader
         )  # start with model_args from command line
         if init_from == 'scratch':
             # init a new model from scratch
@@ -302,15 +335,19 @@ while True:
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0:
         losses = estimate_loss()
-        tqdm.write(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        train_loss_running = losses['train'] if local_iter_num == 0 else (train_loss_running / sample_num_running)
+        tqdm.write(f"step {iter_num}: train loss {train_loss_running:.4f} ({losses['train']:.4f} w/ different random augmentation), val loss {losses['val']:.4f}")
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
-                "train/loss": losses['train'],
+                "train/running/loss": train_loss_running,
+                "train/rand_aug/loss": losses['train'],
                 "val/loss": losses['val'],
                 "lr": lr,
                 # "mfu": FUTURE: estimate mfu and convert it to percentage
             })
+        train_loss_running = 0.0
+        sample_num_running = 0
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val']
             if iter_num > 0:
@@ -339,6 +376,8 @@ while True:
     for micro_step in range(gradient_accumulation_steps):
         with ctx:
             logits, loss = model(nir_imgs, ppg_labels)
+            train_loss_running += loss.item() * nir_imgs.shape[0]
+            sample_num_running += nir_imgs.shape[0]
             loss = loss / gradient_accumulation_steps  # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         # and re-init iterator if needed

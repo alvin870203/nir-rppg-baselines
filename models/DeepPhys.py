@@ -3,6 +3,7 @@ import inspect
 from dataclasses import dataclass
 import numpy as np
 import scipy.signal as sig
+import cv2
 
 from tqdm import tqdm
 import torch
@@ -10,7 +11,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import Dataset
 
-from utils.preprocess import pad_crop_resize
+from transforms.frame_transforms import FrameTransformConfig, FrameTransform
 
 
 @dataclass
@@ -20,6 +21,7 @@ class DeepPhysConfig:
     out_dim: int = 1
     bias: bool = True
     dropout: float = 0.50
+    bbox_scale: float = 1.0  # TODO: move test data loading to dataloader
 
 
 class DeepPhys(nn.Module):
@@ -68,6 +70,12 @@ class DeepPhys(nn.Module):
         self.fully1 = nn.Linear(in_features=64 * (self.config.img_size_h // 4) * (self.config.img_size_w // 4),
                                 out_features=128, bias=config.bias)
         self.fully2 = nn.Linear(in_features=128, out_features=config.out_dim, bias=config.bias)
+
+
+        # TODO: move test data loading to dataloader
+        self.frame_transform = FrameTransform(FrameTransformConfig(img_size_h=config.img_size_h,
+                                                                   img_size_w=config.img_size_w,
+                                                                   bbox_scale=config.bbox_scale))
 
 
     def get_rppg_labels_diff_std(self, train_dataset: Dataset) -> float:
@@ -235,7 +243,7 @@ class DeepPhys(nn.Module):
                 start_idx_t0, end_idx_t0 = start_idx, start_idx + test_dataset.config.test_window_size - 1
                 start_idx_t1, end_idx_t1 = start_idx_t0 + 1, end_idx_t0 + 1
                 nir_imgs_t0, nir_imgs_t1 = [], []
-                bbox_scale = test_dataset.config.bbox_scale if test_dataset.config.crop_face_type != 'no' else None
+                ppg_labels_t0, ppg_labels_t1 = [], []
                 for idx_t0, idx_t1 in zip(range(start_idx_t0, end_idx_t0), range(start_idx_t1, end_idx_t1)):
                     if test_dataset.config.crop_face_type == 'no':
                         face_location_t0 = None
@@ -251,18 +259,27 @@ class DeepPhys(nn.Module):
                         face_location_t1 = face_locations[idx_t1]
                     else:
                         raise NotImplementedError
-                    nir_img_t0 = pad_crop_resize(nir_imgs[idx_t0], resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
-                                                 face_location=face_location_t0, bbox_scale=bbox_scale)
-                    nir_img_t1 = pad_crop_resize(nir_imgs[idx_t1], resize_wh=(test_dataset.config.img_size_w, test_dataset.config.img_size_h),
-                                                 face_location=face_location_t1, bbox_scale=bbox_scale)
+                    nir_img_t0 = torch.from_numpy(nir_imgs[np.newaxis, idx_t0, ...]).float()
+                    nir_img_t1 = torch.from_numpy(nir_imgs[np.newaxis, idx_t1, ...]).float()
+                    ppg_label_t0 = torch.tensor([ppg_labels[idx_t0]]).float()
+                    ppg_label_t1 = torch.tensor([ppg_labels[idx_t1]]).float()
+                    nir_img_t0, ppg_label_t0 = self.frame_transform(nir_img_t0, ppg_label_t0, face_location=face_location_t0)
+                    nir_img_t1, ppg_label_t1 = self.frame_transform(nir_img_t1, ppg_label_t1, face_location=face_location_t1)
                     nir_imgs_t0.append(nir_img_t0)
                     nir_imgs_t1.append(nir_img_t1)
-                nir_imgs_t0 = np.stack(nir_imgs_t0, axis=0)
-                nir_imgs_t1 = np.stack(nir_imgs_t1, axis=0)
-                nir_imgs_torch = torch.stack((torch.from_numpy(nir_imgs_t0),
-                                              torch.from_numpy(nir_imgs_t1)), dim=1).unsqueeze(2).float().to(device)
-                ppg_labels_torch = torch.stack((torch.from_numpy(ppg_labels[start_idx_t0 : end_idx_t0]),
-                                                torch.from_numpy(ppg_labels[start_idx_t1 : end_idx_t1])), dim=1).unsqueeze(2).float().to(device)
+                    ppg_labels_t0.append(ppg_label_t0)
+                    ppg_labels_t1.append(ppg_label_t1)
+                nir_imgs_t0 = torch.stack(nir_imgs_t0, dim=0)
+                nir_imgs_t1 = torch.stack(nir_imgs_t1, dim=0)
+                ppg_labels_t0 = torch.stack(ppg_labels_t0, dim=0)
+                ppg_labels_t1 = torch.stack(ppg_labels_t1, dim=0)
+                nir_imgs_torch = torch.stack((nir_imgs_t0, nir_imgs_t1), dim=1).to(device)
+                ppg_labels_torch = torch.stack((ppg_labels_t0, ppg_labels_t1), dim=1).to(device)
+
+                # Visualization for debug
+                # for i, nir_img in enumerate(nir_imgs_torch[0, :, 0]):
+                #     cv2.imshow(f'nir_imgs{i}', nir_img.cpu().numpy())
+                # cv2.waitKey(0)
 
                 logits, loss = self(nir_imgs_torch, ppg_labels_torch)
 
