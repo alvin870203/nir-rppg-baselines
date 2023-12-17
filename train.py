@@ -206,8 +206,7 @@ match model_name:
             img_w=img_w,
             out_dim=out_dim,
             bias=bias,
-            dropout=dropout,
-            bbox_scale=bbox_scale  # TODO: move test data loading to dataloader
+            dropout=dropout
         )  # start with model_args from command line
         if init_from == 'scratch':
             # init a new model from scratch

@@ -50,7 +50,7 @@ class MRNIRPIndoorDataset(Dataset):
         self.frame_transform = frame_transform
         self.data = self.load_data()  # dict of {subject_name: {nir_img_array, ppg_labels, face_locations}}
         self.window_list = self.get_window_list()  # list of (subject_name, start_idx)
-        self.test_data = self.get_test_data()  # dict of {subject_name: (start_idx_array, bpm_array)}
+        self.test_list = self.get_test_list()  # dict of {subject_name: (start_idxs, bpm_labels, spectrum_labels)}
         self.window_transform = window_transform
         if frame_transform is not None:
             self.frame_transform = frame_transform
@@ -58,6 +58,9 @@ class MRNIRPIndoorDataset(Dataset):
             self.frame_transform = FrameTransform(FrameTransformConfig(img_h=config.img_h,
                                                                        img_w=config.img_w,
                                                                        bbox_scale=config.bbox_scale))
+        self.test_frame_transform = FrameTransform(FrameTransformConfig(img_h=config.img_h,
+                                                                        img_w=config.img_w,
+                                                                        bbox_scale=config.bbox_scale))
 
 
     def load_data(self) -> dict[str, dict[str, np.ndarray]]:
@@ -107,15 +110,15 @@ class MRNIRPIndoorDataset(Dataset):
         return window_list
 
 
-    def get_test_data(self) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    def get_test_list(self) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]:
         test_data = {}
         for subject_name, subject_data in self.data.items():
             nir_imgs = subject_data['nir_imgs']
             ppg_labels = subject_data['ppg_labels']
             face_locations = subject_data['face_locations']
-            start_idx_array = []
-            bpm_array = []
-            spectrum_array = []
+            start_idxs = []
+            bpm_labels = []
+            spectrum_labels = []
             for idx in range(0, len(nir_imgs) - self.config.test_window_size + 1, self.config.test_window_stride):
                 ppg_labels_window = ppg_labels[idx : idx + self.config.test_window_size]
                 if np.any(ppg_labels_window < 1):
@@ -127,15 +130,49 @@ class MRNIRPIndoorDataset(Dataset):
                 max_idx = np.argmax(ppg_labels_window_spectrum[freq_range])
                 max_freq = freq[freq_range][max_idx]
                 bpm = max_freq * 60
-                start_idx_array.append(idx)
-                bpm_array.append(bpm)
-                spectrum_array.append(ppg_labels_window_spectrum)
-            start_idx_array = np.array(start_idx_array)
-            bpm_array = np.array(bpm_array)
-            spectrum_array = np.array(spectrum_array)
-            test_data[subject_name] = (start_idx_array, bpm_array, spectrum_array)
+                start_idxs.append(idx)
+                bpm_labels.append(bpm)
+                spectrum_labels.append(ppg_labels_window_spectrum)
+            start_idxs = np.array(start_idxs)
+            bpm_labels = np.array(bpm_labels)
+            spectrum_labels = np.array(spectrum_labels)
+            test_data[subject_name] = (start_idxs, bpm_labels, spectrum_labels)
 
         return test_data
+
+
+    def get_test_data(self, subject_name: str, start_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        # nir_imgs: (batch_size=test_window_size, window_size, 1, img_h, img_w)
+        # ppg_labels: (batch_size=test_window_size, window_size, 1)
+        # There's only (test_window_size - window_size + 1) windows of window_size in a test_window
+        nir_imgs = []
+        ppg_labels = []
+        for start_idx_t0 in range(start_idx, start_idx + self.config.test_window_size - self.config.window_size + 1):
+            nir_imgs_window = []
+            ppg_labels_window = []
+            for idx in range(start_idx_t0, start_idx_t0 + self.config.window_size):
+                nir_img = self.data[subject_name]['nir_imgs'][idx]
+                ppg_label = self.data[subject_name]['ppg_labels'][idx]
+                if self.config.crop_face_type == 'no':
+                    face_location = None
+                elif self.config.crop_face_type == 'video_first':
+                    face_location = self.data[subject_name]['face_locations'][0]
+                elif self.config.crop_face_type == 'window_first':
+                    face_location = self.data[subject_name]['face_locations'][start_idx_t0]
+                elif self.config.crop_face_type == 'every':
+                    face_location = self.data[subject_name]['face_locations'][start_idx_t0 + idx]
+                else:
+                    raise NotImplementedError
+                nir_img = torch.from_numpy(nir_img[np.newaxis, ...]).float()
+                ppg_label = torch.tensor([ppg_label]).float()
+                nir_img, ppg_label = self.test_frame_transform(nir_img, ppg_label, face_location=face_location)
+                nir_imgs_window.append(nir_img)
+                ppg_labels_window.append(ppg_label)
+            nir_imgs.append(torch.stack(nir_imgs_window, axis=0))
+            ppg_labels.append(torch.stack(ppg_labels_window, axis=0))
+        nir_imgs = torch.stack(nir_imgs, axis=0)
+        ppg_labels = torch.stack(ppg_labels, axis=0)
+        return nir_imgs, ppg_labels
 
 
     def __len__(self) -> int:

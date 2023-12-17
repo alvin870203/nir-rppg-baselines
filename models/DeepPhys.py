@@ -21,7 +21,6 @@ class DeepPhysConfig:
     out_dim: int = 1
     bias: bool = True
     dropout: float = 0.50
-    bbox_scale: float = 1.0  # TODO: move test data loading to dataloader
 
 
 class DeepPhys(nn.Module):
@@ -70,12 +69,6 @@ class DeepPhys(nn.Module):
         self.fully1 = nn.Linear(in_features=64 * (self.config.img_h // 4) * (self.config.img_w // 4),
                                 out_features=128, bias=config.bias)
         self.fully2 = nn.Linear(in_features=128, out_features=config.out_dim, bias=config.bias)
-
-
-        # TODO: move test data loading to dataloader
-        self.frame_transform = FrameTransform(FrameTransformConfig(img_h=config.img_h,
-                                                                   img_w=config.img_w,
-                                                                   bbox_scale=config.bbox_scale))
 
 
     def get_rppg_labels_diff_std(self, train_dataset: Dataset) -> float:
@@ -229,80 +222,43 @@ class DeepPhys(nn.Module):
         self.eval()
 
         result = {}  # {subject_name: {start_idxs, losses, ppg_predicts, ppg_labels, spectrum_predicts, spectrum_labels, bpm_predicts, bpm_labels}}
-        for subject_name, (start_idxs, bpm_labels, spectrum_labels) in test_dataset.test_data.items():
+        for subject_name, (start_idxs, bpm_labels, spectrum_labels) in test_dataset.test_list.items():
             losses = []
-            ppg_predicts, ppg_labels_reshape = [], []
+            ppg_predicts, ppg_labels = [], []
             spectrum_predicts = []
             bpm_predicts = []
-            nir_imgs = test_dataset.data[subject_name]["nir_imgs"]
-            ppg_labels = test_dataset.data[subject_name]["ppg_labels"]
-            face_locations = test_dataset.data[subject_name]["face_locations"]
-            ppg_predict_first = ppg_labels[0]
+            ppg_predict_first = test_dataset.data[subject_name]['ppg_labels'][0]
             for start_idx, bpm_label in zip(start_idxs, bpm_labels):
-                # There's only (test_dataset.config.test_window_size - 1) windows in a test_window
-                start_idx_t0, end_idx_t0 = start_idx, start_idx + test_dataset.config.test_window_size - 1
-                start_idx_t1, end_idx_t1 = start_idx_t0 + 1, end_idx_t0 + 1
-                nir_imgs_t0, nir_imgs_t1 = [], []
-                ppg_labels_t0, ppg_labels_t1 = [], []
-                for idx_t0, idx_t1 in zip(range(start_idx_t0, end_idx_t0), range(start_idx_t1, end_idx_t1)):
-                    if test_dataset.config.crop_face_type == 'no':
-                        face_location_t0 = None
-                        face_location_t1 = None
-                    elif test_dataset.config.crop_face_type == 'video_first':
-                        face_location_t0 = face_locations[0]
-                        face_location_t1 = face_locations[0]
-                    elif test_dataset.config.crop_face_type == 'window_first':
-                        face_location_t0 = face_locations[idx_t0]
-                        face_location_t1 = face_locations[idx_t0]
-                    elif test_dataset.config.crop_face_type == 'every':
-                        face_location_t0 = face_locations[idx_t0]
-                        face_location_t1 = face_locations[idx_t1]
-                    else:
-                        raise NotImplementedError
-                    nir_img_t0 = torch.from_numpy(nir_imgs[np.newaxis, idx_t0, ...]).float()
-                    nir_img_t1 = torch.from_numpy(nir_imgs[np.newaxis, idx_t1, ...]).float()
-                    ppg_label_t0 = torch.tensor([ppg_labels[idx_t0]]).float()
-                    ppg_label_t1 = torch.tensor([ppg_labels[idx_t1]]).float()
-                    nir_img_t0, ppg_label_t0 = self.frame_transform(nir_img_t0, ppg_label_t0, face_location=face_location_t0)
-                    nir_img_t1, ppg_label_t1 = self.frame_transform(nir_img_t1, ppg_label_t1, face_location=face_location_t1)
-                    nir_imgs_t0.append(nir_img_t0)
-                    nir_imgs_t1.append(nir_img_t1)
-                    ppg_labels_t0.append(ppg_label_t0)
-                    ppg_labels_t1.append(ppg_label_t1)
-                nir_imgs_t0 = torch.stack(nir_imgs_t0, dim=0)
-                nir_imgs_t1 = torch.stack(nir_imgs_t1, dim=0)
-                ppg_labels_t0 = torch.stack(ppg_labels_t0, dim=0)
-                ppg_labels_t1 = torch.stack(ppg_labels_t1, dim=0)
-                nir_imgs_torch = torch.stack((nir_imgs_t0, nir_imgs_t1), dim=1).to(device)
-                ppg_labels_torch = torch.stack((ppg_labels_t0, ppg_labels_t1), dim=1).to(device)
+                nir_imgs_window, ppg_labels_window = test_dataset.get_test_data(subject_name, start_idx)
+                nir_imgs_window, ppg_labels_window = nir_imgs_window.to(device), ppg_labels_window.to(device)
 
                 # Visualization for debug
-                # for i, nir_img in enumerate(nir_imgs_torch[0, :, 0]):
+                # for i, nir_img in enumerate(nir_imgs_window[0, :, 0]):
                 #     cv2.imshow(f'nir_imgs{i}', nir_img.cpu().numpy())
                 # cv2.waitKey(0)
 
-                logits, loss = self(nir_imgs_torch, ppg_labels_torch)
+                logits, loss = self(nir_imgs_window, ppg_labels_window)
 
-                ppg_predict = torch.cumsum(logits.squeeze(), dim=0).cpu().numpy() * self.rppg_labels_diff_std
-                ppg_predict = np.concatenate((np.zeros(1), ppg_predict)) + ppg_predict_first  # Add last ppg_predict or ppg_labels[start_idx_t0] as bias
-                ppg_predict_first = ppg_predict[-1]
-                assert len(ppg_predict) == test_dataset.config.test_window_size, f"len of predicted ppg is not the same as ground truth ppg!"
-                ppg_predict_detrend = sig.detrend(ppg_predict)
-                spectrum_predict = np.abs(np.fft.rfft(ppg_predict_detrend))
-                freq = np.fft.rfftfreq(len(ppg_predict_detrend), d=1./test_dataset.config.video_fps)
+                ppg_predicts_window = torch.cumsum(logits.squeeze(), dim=0).cpu().numpy() * self.rppg_labels_diff_std
+                ppg_predicts_window = np.concatenate((np.zeros(1), ppg_predicts_window)) + ppg_predict_first  # Add last ppg_predict or ppg_labels[0] as bias
+                ppg_predict_first = ppg_predicts_window[-1]
+                assert len(ppg_predicts_window) == test_dataset.config.test_window_size, f"len of predicted ppg is not the same as ground truth ppg!"
+                ppg_predicts_detrend = sig.detrend(ppg_predicts_window)
+                spectrum_predict = np.abs(np.fft.rfft(ppg_predicts_detrend))
+                freq = np.fft.rfftfreq(len(ppg_predicts_detrend), d=1./test_dataset.config.video_fps)
                 freq_range = np.logical_and(freq <= test_dataset.config.max_heart_rate / 60, freq >= test_dataset.config.min_heart_rate / 60)
                 max_idx = np.argmax(spectrum_predict[freq_range])
                 max_freq = freq[freq_range][max_idx]
                 bpm_predict = max_freq * 60
 
                 losses.append(loss.item())
-                ppg_predicts.append(ppg_predict)
-                ppg_labels_reshape.append(ppg_labels[start_idx_t0 : end_idx_t1])
+                ppg_predicts.append(ppg_predicts_window)
+                ppg_labels.append(test_dataset.data[subject_name]['ppg_labels'][start_idx : start_idx + test_dataset.config.test_window_size])
                 spectrum_predicts.append(spectrum_predict)
                 bpm_predicts.append(bpm_predict)
 
             result[subject_name] = {'start_idxs': start_idxs, 'losses': np.array(losses),
-                                    'ppg_predicts': np.array(ppg_predicts), 'ppg_labels': np.array(ppg_labels_reshape),
+                                    'ppg_predicts': np.array(ppg_predicts), 'ppg_labels': np.array(ppg_labels),
                                     'spectrum_predicts': np.array(spectrum_predicts), 'spectrum_labels': spectrum_labels,
                                     'bpm_predicts': np.array(bpm_predicts), 'bpm_labels': bpm_labels}
         self.train()
