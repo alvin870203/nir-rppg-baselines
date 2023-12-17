@@ -21,8 +21,8 @@ from transforms.frame_transforms import FrameTransformConfig, FrameTransform
 dataset_name = 'MR-NIRP_Indoor'
 window_size = 2  # unit: frames
 window_stride = 1  # unit: frames
-img_size_h = 256
-img_size_w = 256
+img_h = 128  # input image height of the model
+img_w = 128  # input image width of the model
 video_fps = 30
 ppg_fps = 60
 train_list = ()
@@ -35,11 +35,11 @@ min_heart_rate = 40  # unit: bpm
 crop_face_type = 'no'  # 'no', 'video_fist', 'window_first', 'every'
 bbox_scale = 1.
 # transform related
-window_hflip_p = 0.5
-frame_shift = 0.01  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
-frame_shift_p = 0.2  # probability of applying random bbox shift
-frame_scale_range = (0.99, 1.01)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
-frame_scale_p = 0.2  # probability of applying random bbox scale
+window_hflip_p = 0.0
+frame_shift = 0.0  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
+frame_shift_p = 0.  # probability of applying random bbox shift
+frame_scale_range = (1.0, 1.0)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
+frame_scale_p = 0.0  # probability of applying random bbox scale
 # training related
 init_from = 'scratch'  # 'scratch' or 'resume'
 max_iters = 2
@@ -96,8 +96,8 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 
 # transform
 frame_transform_args = dict(
-    img_size_h=img_size_h,
-    img_size_w=img_size_w,
+    img_h=img_h,
+    img_w=img_w,
     bbox_scale=bbox_scale,
     frame_shift=frame_shift,
     frame_shift_p=frame_shift_p,
@@ -108,8 +108,8 @@ frame_transform_config = FrameTransformConfig(**frame_transform_args)
 frame_transform = FrameTransform(frame_transform_config)
 
 window_transform_args = dict(
-    img_size_h=img_size_h,
-    img_size_w=img_size_w,
+    img_h=img_h,
+    img_w=img_w,
     window_hflip_p=window_hflip_p
 )
 window_transform_config = WindowTransformConfig(**window_transform_args)
@@ -121,8 +121,8 @@ dataset_args = dict(
     dataset_root_path=os.path.join('data', dataset_name),
     window_size=window_size,
     window_stride=window_stride,
-    img_size_h=img_size_h,
-    img_size_w=img_size_w,
+    img_h=img_h,
+    img_w=img_w,
     video_fps=video_fps,
     ppg_fps=ppg_fps,
     train_list=train_list,
@@ -184,8 +184,8 @@ else:
 match model_name:
     case 'Dummy':
         model_args = dict(
-            img_size_h=img_size_h,
-            img_size_w=img_size_w,
+            img_h=img_h,
+            img_w=img_w,
             out_dim=out_dim,
             bias=bias
         )  # start with model_args from command line
@@ -195,15 +195,15 @@ match model_name:
         elif init_from == 'resume':
             # force these config attributes to be equal otherwise we can't even resume training
             # the rest of the attributes (e.g. dropout) can stay as desired from command line
-            for k in ['img_size_h', 'img_size_w', 'out_dim', 'bias']:
+            for k in ['img_h', 'img_w', 'out_dim', 'bias']:
                 model_args[k] = checkpoint_model_args[k]
             # create the model
             model_config = DummyConfig(**model_args)
             model = Dummy(model_config, train_dataset)
     case 'DeepPhys':
         model_args = dict(
-            img_size_h=img_size_h,
-            img_size_w=img_size_w,
+            img_h=img_h,
+            img_w=img_w,
             out_dim=out_dim,
             bias=bias,
             dropout=dropout,
@@ -216,7 +216,7 @@ match model_name:
         elif init_from == 'resume':
             # force these config attributes to be equal otherwise we can't even resume training
             # the rest of the attributes (e.g. dropout) can stay as desired from command line
-            for k in ['img_size_h', 'img_size_w', 'out_dim', 'bias']:
+            for k in ['img_h', 'img_w', 'out_dim', 'bias']:
                 model_args[k] = checkpoint_model_args[k]
             # create the model
             model_config = DeepPhysConfig(**model_args)

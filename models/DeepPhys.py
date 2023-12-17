@@ -16,8 +16,8 @@ from transforms.frame_transforms import FrameTransformConfig, FrameTransform
 
 @dataclass
 class DeepPhysConfig:
-    img_size_h: int = 640
-    img_size_w: int = 640
+    img_h: int = 128  # input image height of the model
+    img_w: int = 128  # input image width of the model
     out_dim: int = 1
     bias: bool = True
     dropout: float = 0.50
@@ -67,14 +67,14 @@ class DeepPhys(nn.Module):
 
         # Fully connected blocks
         self.d3 = nn.Dropout(p=config.dropout / 2)
-        self.fully1 = nn.Linear(in_features=64 * (self.config.img_size_h // 4) * (self.config.img_size_w // 4),
+        self.fully1 = nn.Linear(in_features=64 * (self.config.img_h // 4) * (self.config.img_w // 4),
                                 out_features=128, bias=config.bias)
         self.fully2 = nn.Linear(in_features=128, out_features=config.out_dim, bias=config.bias)
 
 
         # TODO: move test data loading to dataloader
-        self.frame_transform = FrameTransform(FrameTransformConfig(img_size_h=config.img_size_h,
-                                                                   img_size_w=config.img_size_w,
+        self.frame_transform = FrameTransform(FrameTransformConfig(img_h=config.img_h,
+                                                                   img_w=config.img_w,
                                                                    bbox_scale=config.bbox_scale))
 
 
@@ -88,7 +88,7 @@ class DeepPhys(nn.Module):
 
 
     def forward(self, nir_imgs: torch.Tensor, ppg_labels: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
-        # nir_imgs: (batch_size, window_size, 1, img_size_h, img_size_w)
+        # nir_imgs: (batch_size, window_size, 1, img_h, img_w)
         # ppg_labels: (batch_size, window_size, 1)
 
         device = nir_imgs.device

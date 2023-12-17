@@ -8,8 +8,8 @@ from torch.nn import functional as F
 
 @dataclass
 class DummyConfig:
-    img_size_h: int = 640
-    img_size_w: int = 640
+    img_h: int = 128  # input image height of the model
+    img_w: int = 128  # input image width of the model
     out_dim: int = 1
     bias: bool = True
 
@@ -28,12 +28,12 @@ class Dummy(nn.Module):
             nn.MaxPool2d(2),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(32 * (config.img_size_h // 4) * (config.img_size_w // 4), config.out_dim, bias=config.bias)
+            nn.Linear(32 * (config.img_h // 4) * (config.img_w // 4), config.out_dim, bias=config.bias)
         )
 
 
     def forward(self, nir_imgs: torch.Tensor, ppg_labels: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
-        # nir_imgs: (batch_size, window_size, 1, img_size_h, img_size_w)
+        # nir_imgs: (batch_size, window_size, 1, img_h, img_w)
         # ppg_labels: (batch_size, window_size, 1)
 
         device = nir_imgs.device

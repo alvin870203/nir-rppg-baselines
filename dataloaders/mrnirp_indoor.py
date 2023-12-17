@@ -24,8 +24,8 @@ class MRNIRPIndoorDatasetConfig:
     dataset_root_path: str = '/mnt/Data/MR-NIRP_Indoor/'
     window_size: int = 2  # unit: frames
     window_stride: int = 1  # unit: frames
-    img_size_h: int = 128
-    img_size_w: int = 128
+    img_h: int = 128  # input image height of the model
+    img_w: int = 128  # input image width of the model
     video_fps: float = 30.
     ppg_fps: float = 60.
     train_list: tuple[str] = ()
@@ -55,8 +55,8 @@ class MRNIRPIndoorDataset(Dataset):
         if frame_transform is not None:
             self.frame_transform = frame_transform
         else:
-            self.frame_transform = FrameTransform(FrameTransformConfig(img_size_h=config.img_size_h,
-                                                                       img_size_w=config.img_size_w,
+            self.frame_transform = FrameTransform(FrameTransformConfig(img_h=config.img_h,
+                                                                       img_w=config.img_w,
                                                                        bbox_scale=config.bbox_scale))
 
 
@@ -143,7 +143,7 @@ class MRNIRPIndoorDataset(Dataset):
 
 
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
-        # nir_imgs: (batch_size, window_size, 1, img_size_h, img_size_w)
+        # nir_imgs: (batch_size, window_size, 1, img_h, img_w)
         # ppg_labels: (batch_size, window_size, 1)
         subject_name, start_idx = self.window_list[idx]
         nir_imgs = []

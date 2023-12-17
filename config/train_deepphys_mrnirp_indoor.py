@@ -6,8 +6,8 @@ import time
 dataset_name = 'MR-NIRP_Indoor'
 window_size = 2  # unit: frames
 window_stride = 1  # unit: frames
-img_size_h = 36
-img_size_w = 36
+img_h = 36  # input image height of the model
+img_w = 36  # input image width of the model
 video_fps = 30.
 ppg_fps = 60.
 train_list = (                       'Subject1_still_940', 'Subject2_motion_940', 'Subject2_still_940',
@@ -19,11 +19,11 @@ crop_face_type = 'video_first'  # 'no', 'video_fist', 'window_first', 'every'
 bbox_scale = 1.6
 
 # transform related
-window_hflip_p = 0.5
-frame_shift = 0.01  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
-frame_shift_p = 0.2  # probability of applying random bbox shift
-frame_scale_range = (0.99, 1.01)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
-frame_scale_p = 0.2  # probability of applying random bbox scale
+window_hflip_p = 0.0
+frame_shift = 0.0  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
+frame_shift_p = 0.0  # probability of applying random bbox shift
+frame_scale_range = (1.0, 1.0)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
+frame_scale_p = 0.0  # probability of applying random bbox scale
 
 # training related
 # the number of examples per iter:

@@ -9,8 +9,8 @@ from torchvision.transforms import v2
 
 @dataclass
 class WindowTransformConfig:
-    img_size_h: int = 128
-    img_size_w: int = 128
+    img_h: int = 128  # input image height of the model
+    img_w: int = 128  # input image width of the model
     window_hflip_p: float = 0.
 
 

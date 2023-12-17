@@ -4,8 +4,8 @@
 dataset_name = 'MR-NIRP_Indoor'
 window_size = 2  # unit: frames
 window_stride = 1  # unit: frames
-img_size_h = 36
-img_size_w = 36
+img_h = 36  # input image height of the model
+img_w = 36  # input image width of the model
 video_fps = 30.
 ppg_fps = 60.
 train_list = (                       'Subject1_still_940', 'Subject2_motion_940', 'Subject2_still_940',

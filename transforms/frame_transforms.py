@@ -8,13 +8,13 @@ from torchvision.transforms import v2
 
 @dataclass
 class FrameTransformConfig:
-    img_size_h: int = 128
-    img_size_w: int = 128
+    img_h: int = 128  # input image height of the model
+    img_w: int = 128  # input width height of the model
     bbox_scale: float = 1.0
     frame_shift: float = 0.0  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
-    frame_shift_p: float = 0.2  # probability of applying random bbox shift
+    frame_shift_p: float = 0.0  # probability of applying random bbox shift
     frame_scale_range: tuple[float, float] = (1.0, 1.0)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
-    frame_scale_p: float = 0.2  # probability of applying random bbox scale
+    frame_scale_p: float = 0.0  # probability of applying random bbox scale
 
 
 class FrameTransform(nn.Module):
@@ -34,7 +34,7 @@ class FrameTransform(nn.Module):
         left, top, right, bottom = (0, 0, orig_nir_img_w, orig_nir_img_h) if face_location is None else face_location
         center_x, center_y = (left + right) // 2, (top + bottom) // 2
         face_aspect_ratio = (right - left) / (bottom - top)
-        bbox_aspect_ratio = self.config.img_size_w / self.config.img_size_h
+        bbox_aspect_ratio = self.config.img_w / self.config.img_h
         if face_aspect_ratio > bbox_aspect_ratio:
             bbox_w = right - left
             bbox_h = bbox_w / bbox_aspect_ratio
@@ -78,6 +78,6 @@ class FrameTransform(nn.Module):
         height = bottom - top
         width = right - left
         nir_img = v2.functional.crop(nir_img, top, left, height, width)
-        if (orig_nir_img_h, orig_nir_img_w) != (self.config.img_size_h, self.config.img_size_w):
-            nir_img = v2.functional.resize(nir_img, (self.config.img_size_h, self.config.img_size_w), antialias=True)
+        if (orig_nir_img_h, orig_nir_img_w) != (self.config.img_h, self.config.img_w):
+            nir_img = v2.functional.resize(nir_img, (self.config.img_h, self.config.img_w), antialias=True)
         return nir_img, ppg_label
