@@ -11,6 +11,7 @@ from tqdm import tqdm
 from dataloaders.mrnirp_indoor import MRNIRPIndoorDatasetConfig, MRNIRPIndoorDataset
 from models.Dummy import DummyConfig, Dummy
 from models.DeepPhys import DeepPhysConfig, DeepPhys
+from transforms.video_transforms import VideoTransformConfig, VideoTransform
 from transforms.window_transforms import WindowTransformConfig, WindowTransform
 from transforms.frame_transforms import FrameTransformConfig, FrameTransform
 
@@ -35,6 +36,8 @@ min_heart_rate = 40  # unit: bpm
 crop_face_type = 'no'  # 'no', 'video_fist', 'window_first', 'every'
 bbox_scale = 1.
 # transform related
+video_freq_scale_range = (1.0, 1.0)  # augmented freq ~= freq * random.uniform(min, max), e.g., (0.7, 1.4)
+video_freq_scale_p = 0.0  # probability of applying random video freq scale
 window_hflip_p = 0.0
 frame_shift = 0.0  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
 frame_shift_p = 0.  # probability of applying random bbox shift
@@ -95,6 +98,23 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 
 
 # transform
+video_transform_args = dict(
+    window_size=window_size,
+    video_fps=video_fps,
+    video_freq_scale_range=video_freq_scale_range,
+    video_freq_scale_p=video_freq_scale_p
+)
+video_transform_config = VideoTransformConfig(**video_transform_args)
+video_transform = VideoTransform(video_transform_config)
+
+window_transform_args = dict(
+    img_h=img_h,
+    img_w=img_w,
+    window_hflip_p=window_hflip_p
+)
+window_transform_config = WindowTransformConfig(**window_transform_args)
+window_transform = WindowTransform(window_transform_config)
+
 frame_transform_args = dict(
     img_h=img_h,
     img_w=img_w,
@@ -106,14 +126,6 @@ frame_transform_args = dict(
 )
 frame_transform_config = FrameTransformConfig(**frame_transform_args)
 frame_transform = FrameTransform(frame_transform_config)
-
-window_transform_args = dict(
-    img_h=img_h,
-    img_w=img_w,
-    window_hflip_p=window_hflip_p
-)
-window_transform_config = WindowTransformConfig(**window_transform_args)
-window_transform = WindowTransform(window_transform_config)
 
 
 # dataloader
@@ -139,6 +151,7 @@ match dataset_name:
     case 'MR-NIRP_Indoor':
         dataset_config = MRNIRPIndoorDatasetConfig(**dataset_args)
         train_dataset = MRNIRPIndoorDataset(dataset_config, 'train',
+                                            video_transform=video_transform,
                                             window_transform=window_transform,
                                             frame_transform=frame_transform)
         val_dataset = MRNIRPIndoorDataset(dataset_config, 'val')

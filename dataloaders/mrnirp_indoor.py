@@ -88,9 +88,6 @@ class MRNIRPIndoorDataset(Dataset):
             ppg_labels_resampled = sig.resample(ppg_labels, len(nir_imgs))
             ppg_time_resampled = np.linspace(ppg_time[0], ppg_time[-1], len(nir_imgs))
 
-            if self.video_transform is not None:
-                pass  # TODO: Video-level transform
-
             data[subject_name] = {"nir_imgs": nir_imgs, "ppg_labels": ppg_labels_resampled, "face_locations": face_locations}
 
         return data
@@ -185,8 +182,16 @@ class MRNIRPIndoorDataset(Dataset):
         subject_name, start_idx = self.window_list[idx]
         nir_imgs = []
         ppg_labels = []
-        for i, (nir_img, ppg_label) in enumerate(zip(self.data[subject_name]['nir_imgs'][start_idx : start_idx + self.config.window_size],
-                                                     self.data[subject_name]['ppg_labels'][start_idx : start_idx + self.config.window_size])):
+
+        if self.video_transform is not None:
+            data_nir_imgs = torch.from_numpy(self.data[subject_name]['nir_imgs'][start_idx:]).unsqueeze(1).float()
+            data_ppg_labels = torch.from_numpy(self.data[subject_name]['ppg_labels'][start_idx:]).unsqueeze(1).float()
+            data_nir_imgs, data_ppg_labels = self.video_transform(data_nir_imgs, data_ppg_labels)
+        else:
+            data_nir_imgs = torch.from_numpy(self.data[subject_name]['nir_imgs'][start_idx : start_idx + self.config.window_size]).unsqueeze(1).float()
+            data_ppg_labels = torch.from_numpy(self.data[subject_name]['ppg_labels'][start_idx : start_idx + self.config.window_size]).unsqueeze(1).float()
+
+        for i, (nir_img, ppg_label) in enumerate(zip(data_nir_imgs, data_ppg_labels)):
             if self.config.crop_face_type == 'no':
                 face_location = None
             elif self.config.crop_face_type == 'video_first':
@@ -197,8 +202,6 @@ class MRNIRPIndoorDataset(Dataset):
                 face_location = self.data[subject_name]['face_locations'][start_idx + i]
             else:
                 raise NotImplementedError
-            nir_img = torch.from_numpy(nir_img[np.newaxis, ...]).float()
-            ppg_label = torch.tensor([ppg_label]).float()
             nir_img, ppg_label = self.frame_transform(nir_img, ppg_label, face_location=face_location)
             nir_imgs.append(nir_img)
             ppg_labels.append(ppg_label)

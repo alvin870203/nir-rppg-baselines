@@ -19,6 +19,8 @@ crop_face_type = 'video_first'  # 'no', 'video_fist', 'window_first', 'every'
 bbox_scale = 1.6
 
 # transform related
+video_freq_scale_range = (1.0, 1.0)  # augmented freq ~= freq * random.uniform(min, max), e.g., (0.7, 1.4)
+video_freq_scale_p = 0.0  # probability of applying random video freq scale
 window_hflip_p = 0.0
 frame_shift = 0.0  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
 frame_shift_p = 0.0  # probability of applying random bbox shift
