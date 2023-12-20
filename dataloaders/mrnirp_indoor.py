@@ -16,7 +16,7 @@ from torch.utils.data.dataloader import DataLoader
 from torchvision.transforms import v2
 from torchvision.transforms.v2 import Transform
 
-from transforms.frame_transforms import FrameTransformConfig, FrameTransform
+from transforms.window_transforms import WindowTransformConfig, WindowTransform
 
 
 @dataclass
@@ -45,22 +45,19 @@ class MRNIRPIndoorDataset(Dataset):
         assert split in ['train', 'val', 'test']
         self.config = config
         self.split = split
-        self.video_transform = video_transform
-        self.window_transform = window_transform
-        self.frame_transform = frame_transform
         self.data = self.load_data()  # dict of {subject_name: {nir_img_array, ppg_labels, face_locations}}
         self.window_list = self.get_window_list()  # list of (subject_name, start_idx)
         self.test_list = self.get_test_list()  # dict of {subject_name: (start_idxs, bpm_labels, spectrum_labels)}
-        self.window_transform = window_transform
-        if frame_transform is not None:
-            self.frame_transform = frame_transform
+        self.video_transform = video_transform
+        if window_transform is not None:
+            self.window_transform = window_transform
         else:
-            self.frame_transform = FrameTransform(FrameTransformConfig(img_h=config.img_h,
-                                                                       img_w=config.img_w,
-                                                                       bbox_scale=config.bbox_scale))
-        self.test_frame_transform = FrameTransform(FrameTransformConfig(img_h=config.img_h,
-                                                                        img_w=config.img_w,
-                                                                        bbox_scale=config.bbox_scale))
+            self.window_transform = WindowTransform(WindowTransformConfig(img_h=config.img_h,
+                                                                          img_w=config.img_w,
+                                                                          bbox_scale=config.bbox_scale))
+        self.test_window_transform = WindowTransform(WindowTransformConfig(img_h=config.img_h,
+                                                                           img_w=config.img_w,
+                                                                           bbox_scale=config.bbox_scale))
 
 
     def load_data(self) -> dict[str, dict[str, np.ndarray]]:
@@ -145,11 +142,10 @@ class MRNIRPIndoorDataset(Dataset):
         nir_imgs = []
         ppg_labels = []
         for start_idx_t0 in range(start_idx, start_idx + self.config.test_window_size - self.config.window_size + 1):
-            nir_imgs_window = []
-            ppg_labels_window = []
+            nir_imgs_window = torch.from_numpy(self.data[subject_name]['nir_imgs'][start_idx_t0 : start_idx_t0 + self.config.window_size]).unsqueeze(1).float()
+            ppg_labels_window = torch.from_numpy(self.data[subject_name]['ppg_labels'][start_idx_t0 : start_idx_t0 + self.config.window_size]).unsqueeze(1).float()
+            face_locations = []
             for idx in range(start_idx_t0, start_idx_t0 + self.config.window_size):
-                nir_img = self.data[subject_name]['nir_imgs'][idx]
-                ppg_label = self.data[subject_name]['ppg_labels'][idx]
                 if self.config.crop_face_type == 'no':
                     face_location = None
                 elif self.config.crop_face_type == 'video_first':
@@ -160,13 +156,11 @@ class MRNIRPIndoorDataset(Dataset):
                     face_location = self.data[subject_name]['face_locations'][start_idx_t0 + idx]
                 else:
                     raise NotImplementedError
-                nir_img = torch.from_numpy(nir_img[np.newaxis, ...]).float()
-                ppg_label = torch.tensor([ppg_label]).float()
-                nir_img, ppg_label = self.test_frame_transform(nir_img, ppg_label, face_location=face_location)
-                nir_imgs_window.append(nir_img)
-                ppg_labels_window.append(ppg_label)
-            nir_imgs.append(torch.stack(nir_imgs_window, axis=0))
-            ppg_labels.append(torch.stack(ppg_labels_window, axis=0))
+                face_locations.append(face_location)
+            face_locations = np.array(face_locations)
+            nir_imgs_window, ppg_labels_window = self.test_window_transform(nir_imgs_window, ppg_labels_window, face_locations)
+            nir_imgs.append(nir_imgs_window)
+            ppg_labels.append(ppg_labels_window)
         nir_imgs = torch.stack(nir_imgs, axis=0)
         ppg_labels = torch.stack(ppg_labels, axis=0)
         return nir_imgs, ppg_labels
@@ -180,18 +174,17 @@ class MRNIRPIndoorDataset(Dataset):
         # nir_imgs: (batch_size, window_size, 1, img_h, img_w)
         # ppg_labels: (batch_size, window_size, 1)
         subject_name, start_idx = self.window_list[idx]
-        nir_imgs = []
-        ppg_labels = []
 
         if self.video_transform is not None:
             data_nir_imgs = torch.from_numpy(self.data[subject_name]['nir_imgs'][start_idx:]).unsqueeze(1).float()
             data_ppg_labels = torch.from_numpy(self.data[subject_name]['ppg_labels'][start_idx:]).unsqueeze(1).float()
-            data_nir_imgs, data_ppg_labels = self.video_transform(data_nir_imgs, data_ppg_labels)
+            nir_imgs, ppg_labels = self.video_transform(data_nir_imgs, data_ppg_labels)
         else:
-            data_nir_imgs = torch.from_numpy(self.data[subject_name]['nir_imgs'][start_idx : start_idx + self.config.window_size]).unsqueeze(1).float()
-            data_ppg_labels = torch.from_numpy(self.data[subject_name]['ppg_labels'][start_idx : start_idx + self.config.window_size]).unsqueeze(1).float()
+            nir_imgs = torch.from_numpy(self.data[subject_name]['nir_imgs'][start_idx : start_idx + self.config.window_size]).unsqueeze(1).float()
+            ppg_labels = torch.from_numpy(self.data[subject_name]['ppg_labels'][start_idx : start_idx + self.config.window_size]).unsqueeze(1).float()
 
-        for i, (nir_img, ppg_label) in enumerate(zip(data_nir_imgs, data_ppg_labels)):
+        face_locations = []
+        for i in range(self.config.window_size):
             if self.config.crop_face_type == 'no':
                 face_location = None
             elif self.config.crop_face_type == 'video_first':
@@ -202,15 +195,10 @@ class MRNIRPIndoorDataset(Dataset):
                 face_location = self.data[subject_name]['face_locations'][start_idx + i]
             else:
                 raise NotImplementedError
-            nir_img, ppg_label = self.frame_transform(nir_img, ppg_label, face_location=face_location)
-            nir_imgs.append(nir_img)
-            ppg_labels.append(ppg_label)
+            face_locations.append(face_location)
+        face_locations = np.array(face_locations)
+        nir_imgs, ppg_labels = self.window_transform(nir_imgs, ppg_labels, face_locations)
         # NOTE: torch.from_numpy does not copy the data, be aware of this if you don't want to modify the data in-place.
-        nir_imgs = torch.stack(nir_imgs, axis=0)
-        ppg_labels = torch.stack(ppg_labels, axis=0)
-
-        if self.window_transform is not None:
-            nir_imgs, ppg_labels = self.window_transform(nir_imgs, ppg_labels)
 
         # Visualization for debug
         # if self.split == 'train':

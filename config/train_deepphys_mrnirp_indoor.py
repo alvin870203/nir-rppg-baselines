@@ -24,14 +24,11 @@ rppg_labels_diff_std = 6.969092845916748
 # transform related
 video_freq_scale_range = (1.0, 1.0)  # augmented freq ~= freq * random.uniform(min, max), e.g., (0.7, 1.4)
 video_freq_scale_p = 0.0  # probability of applying random video freq scale
+window_shift = 0.0  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
+window_shift_p = 0.0  # probability of applying random bbox shift
+window_scale_range = (1.0, 1.0)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
+window_scale_p = 0.0  # probability of applying random bbox scale
 window_hflip_p = 0.0
-window_affine_rotate = 0.0  # unit: degrees
-window_affine_shift = (0.0, 0.0)  # horizontal and vertical shift is btw +-img_w*a and +-img_h*b
-window_scale_range = (1.0, 1.0)  # (min, max) scale factor
-frame_shift = 0.0  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
-frame_shift_p = 0.0  # probability of applying random bbox shift
-frame_scale_range = (1.0, 1.0)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
-frame_scale_p = 0.0  # probability of applying random bbox scale
 
 # training related
 # the number of examples per iter:
