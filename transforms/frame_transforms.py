@@ -17,6 +17,8 @@ class FrameTransformConfig:
     frame_scale_p: float = 0.0  # probability of applying random bbox scale
 
 
+# FUTURE: combine FrameTransform and WindowTransform into a single transform,
+#         with option of different or same transform for each frame in a window.
 class FrameTransform(nn.Module):
     def __init__(self, config: FrameTransformConfig):
         super().__init__()
@@ -43,7 +45,6 @@ class FrameTransform(nn.Module):
             bbox_w = bbox_h * bbox_aspect_ratio
 
         if "random_bbox_shift" in self.transform:
-            # TODO: Same or similar random shift for all frames in a window or not?
             frame_shift_x = np.random.choice([0.0, np.random.uniform(-self.config.frame_shift, self.config.frame_shift)],
                                              p=[1 - self.config.frame_shift_p, self.config.frame_shift_p])
             frame_shift_y = np.random.choice([0.0, np.random.uniform(-self.config.frame_shift, self.config.frame_shift)],
@@ -53,7 +54,6 @@ class FrameTransform(nn.Module):
 
         base_bbox_scale = 1.0 if face_location is None else self.config.bbox_scale
         if "random_bbox_scale" in self.transform:
-            # TODO: Same or similar random scale for all frames in a window or not?
             frame_scale = np.random.choice([1.0, np.random.uniform(*self.config.frame_scale_range)],
                                            p=[1 - self.config.frame_scale_p, self.config.frame_scale_p])
             bbox_scale = base_bbox_scale * frame_scale

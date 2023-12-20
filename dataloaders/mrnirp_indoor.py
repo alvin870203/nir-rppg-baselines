@@ -213,9 +213,10 @@ class MRNIRPIndoorDataset(Dataset):
             nir_imgs, ppg_labels = self.window_transform(nir_imgs, ppg_labels)
 
         # Visualization for debug
-        # if self.split == 'val':
+        # if self.split == 'train':
         #     for i, nir_img in enumerate(nir_imgs[:, 0]):
         #         cv2.imshow(f'nir_imgs{i}', nir_img.numpy())
+        #         print(f"{nir_img.shape=}")
         #     cv2.waitKey(0)
 
         return nir_imgs, ppg_labels
