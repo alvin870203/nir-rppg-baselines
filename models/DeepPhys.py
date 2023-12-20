@@ -21,14 +21,15 @@ class DeepPhysConfig:
     out_dim: int = 1
     bias: bool = True
     dropout: float = 0.50
+    nir_imgs_mean: float = 0.0
+    nir_imgs_std: float = 1.0
+    rppg_labels_diff_std: float = 1.0
 
 
 class DeepPhys(nn.Module):
-    def __init__(self, config: DeepPhysConfig, train_dataset: Dataset):
+    def __init__(self, config: DeepPhysConfig):
         super().__init__()
         self.config = config
-
-        self.rppg_labels_diff_std = self.get_rppg_labels_diff_std(train_dataset)
 
         # Implementation by terbed/Deep-rPPG
         # Appearance stream
@@ -71,15 +72,6 @@ class DeepPhys(nn.Module):
         self.fully2 = nn.Linear(in_features=128, out_features=config.out_dim, bias=config.bias)
 
 
-    def get_rppg_labels_diff_std(self, train_dataset: Dataset) -> float:
-        rppg_labels_diff = []
-        for _, ppg_labels in train_dataset:
-            rppg_labels_diff.append((ppg_labels[1] - ppg_labels[0]))
-        rppg_labels_diff = np.concatenate(rppg_labels_diff)
-        # np.save("rppg_signals_diff.npy", rppg_labels_diff)  # For inspecting the distribution by test_MR-NIRP_Indoor_statistics.ipynb
-        return rppg_labels_diff.std()
-
-
     def forward(self, nir_imgs: torch.Tensor, ppg_labels: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         # nir_imgs: (batch_size, window_size, 1, img_h, img_w)
         # ppg_labels: (batch_size, window_size, 1)
@@ -87,6 +79,7 @@ class DeepPhys(nn.Module):
         device = nir_imgs.device
 
         # Implementation by terbed/Deep-rPPG
+        nir_imgs = (nir_imgs - self.config.nir_imgs_mean) / self.config.nir_imgs_std  # Normalization
         A = nir_imgs[:, 0]
         M = torch.div(nir_imgs[:, 1] - nir_imgs[:, 0], nir_imgs[:, 1] + nir_imgs[:, 0] + 1e-8)  # +1e-8 to avoid division by zero
 
@@ -142,7 +135,7 @@ class DeepPhys(nn.Module):
         if ppg_labels is not None:
             # if we are given some desired targets also calculate the loss
             # for differentiated ppg regression
-            labels = (ppg_labels[:, 1] - ppg_labels[:, 0]) / self.rppg_labels_diff_std
+            labels = (ppg_labels[:, 1] - ppg_labels[:, 0]) / self.config.rppg_labels_diff_std
             loss = F.mse_loss(logits, labels)
         else:
             loss = None
@@ -239,7 +232,7 @@ class DeepPhys(nn.Module):
 
                 logits, loss = self(nir_imgs_window, ppg_labels_window)
 
-                ppg_predicts_window = torch.cumsum(logits.squeeze(), dim=0).cpu().numpy() * self.rppg_labels_diff_std
+                ppg_predicts_window = torch.cumsum(logits.squeeze(), dim=0).cpu().numpy() * self.config.rppg_labels_diff_std
                 ppg_predicts_window = np.concatenate((np.zeros(1), ppg_predicts_window)) + ppg_predict_first  # Add last ppg_predict or ppg_labels[0] as bias
                 ppg_predict_first = ppg_predicts_window[-1]
                 assert len(ppg_predicts_window) == test_dataset.config.test_window_size, f"len of predicted ppg is not the same as ground truth ppg!"

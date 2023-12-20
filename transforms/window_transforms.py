@@ -19,7 +19,6 @@ class WindowTransform(nn.Module):
         super().__init__()
         self.config = config
         transform_list = []
-        # TODO: Normalization
         if config.window_hflip_p > 0:
             transform_list.append(v2.RandomHorizontalFlip(config.window_hflip_p))
         # FUTURE: transform related to crop and face_location to simulate the unstable face detection

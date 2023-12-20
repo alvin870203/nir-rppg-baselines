@@ -35,6 +35,9 @@ max_heart_rate = 250  # unit: bpm
 min_heart_rate = 40  # unit: bpm
 crop_face_type = 'no'  # 'no', 'video_fist', 'window_first', 'every'
 bbox_scale = 1.
+nir_imgs_mean = 0.0
+nir_imgs_std = 1.0
+rppg_labels_diff_std = 1.0
 # transform related
 video_freq_scale_range = (1.0, 1.0)  # augmented freq ~= freq * random.uniform(min, max), e.g., (0.7, 1.4)
 video_freq_scale_p = 0.0  # probability of applying random video freq scale
@@ -219,12 +222,15 @@ match model_name:
             img_w=img_w,
             out_dim=out_dim,
             bias=bias,
-            dropout=dropout
+            dropout=dropout,
+            nir_imgs_mean=nir_imgs_mean,
+            nir_imgs_std=nir_imgs_std,
+            rppg_labels_diff_std=rppg_labels_diff_std
         )  # start with model_args from command line
         if init_from == 'scratch':
             # init a new model from scratch
             model_config = DeepPhysConfig(**model_args)
-            model = DeepPhys(model_config, train_dataset)
+            model = DeepPhys(model_config)
         elif init_from == 'resume':
             # force these config attributes to be equal otherwise we can't even resume training
             # the rest of the attributes (e.g. dropout) can stay as desired from command line
@@ -232,7 +238,7 @@ match model_name:
                 model_args[k] = checkpoint_model_args[k]
             # create the model
             model_config = DeepPhysConfig(**model_args)
-            model = DeepPhys(model_config, train_dataset)
+            model = DeepPhys(model_config)
         else:
             pass  # FUTURE: init from pretrained
     case _:

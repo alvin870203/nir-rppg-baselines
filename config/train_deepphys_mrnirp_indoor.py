@@ -17,6 +17,9 @@ train_list = (                       'Subject1_still_940', 'Subject2_motion_940'
 val_list = ('Subject1_motion_940')
 crop_face_type = 'video_first'  # 'no', 'video_fist', 'window_first', 'every'
 bbox_scale = 1.6
+nir_imgs_mean = 0.0
+nir_imgs_std = 1.0
+rppg_labels_diff_std = 6.969092845916748
 
 # transform related
 video_freq_scale_range = (1.0, 1.0)  # augmented freq ~= freq * random.uniform(min, max), e.g., (0.7, 1.4)
