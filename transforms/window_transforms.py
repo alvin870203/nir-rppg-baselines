@@ -29,6 +29,9 @@ class WindowTransform(nn.Module):
             self.transform.append("random_bbox_shift")
         if config.window_scale_range != (1.0, 1.0):
             self.transform.append("random_bbox_scale")
+        if config.window_hflip_p != 0.0:
+            self.transform.append("random_hflip")
+            self.random_hflip = v2.RandomHorizontalFlip(p=config.window_hflip_p)
 
 
     def forward(self, nir_imgs: torch.Tensor, ppg_labels: torch.Tensor, face_locations: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
@@ -98,5 +101,8 @@ class WindowTransform(nn.Module):
 
         nir_imgs_transformed = torch.stack(nir_imgs_transformed)
         ppg_labels_transformed = torch.stack(ppg_labels_transformed)
+
+        if "random_hflip" in self.transform:
+            nir_imgs_transformed = self.random_hflip(nir_imgs_transformed)
 
         return nir_imgs_transformed, ppg_labels_transformed
