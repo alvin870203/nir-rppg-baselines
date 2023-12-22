@@ -90,7 +90,7 @@ class WindowTransform(nn.Module):
             height = bottom - top
             width = right - left
             nir_img = v2.functional.crop(nir_img, top, left, height, width)
-            if (orig_nir_img_h, orig_nir_img_w) != (self.config.img_h, self.config.img_w):
+            if (height, width) != (self.config.img_h, self.config.img_w):
                 nir_img = v2.functional.resize(nir_img, (self.config.img_h, self.config.img_w), antialias=True)
 
             nir_imgs_transformed.append(nir_img)

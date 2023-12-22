@@ -10,6 +10,8 @@ from tqdm import tqdm
 
 from dataloaders.mrnirp_indoor import MRNIRPIndoorDatasetConfig, MRNIRPIndoorDataset
 from models.Dummy import DummyConfig, Dummy
+from models.Mean import MeanConfig, Mean
+from models.Median import MedianConfig, Median
 from models.DeepPhys import DeepPhysConfig, DeepPhys
 from transforms.video_transforms import VideoTransformConfig, VideoTransform
 from transforms.window_transforms import WindowTransformConfig, WindowTransform
@@ -83,7 +85,7 @@ dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported
 compile = True  # use PyTorch 2.0 to compile the model to be faster
 num_workers = 4
 # -----------------------------------------------------------------------------
-config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
+config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str, tuple))]
 exec(open('configurator.py').read())  # overrides from command line or config file
 config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 # -----------------------------------------------------------------------------
@@ -208,6 +210,26 @@ match model_name:
             # create the model
             model_config = DummyConfig(**model_args)
             model = Dummy(model_config, train_dataset)
+    case 'Mean':
+        model_args = dict(
+            out_dim=out_dim,
+            rppg_labels_diff_std=rppg_labels_diff_std
+        )  # start with model_args from command line
+        if init_from == 'scratch':
+            model_config = MeanConfig(**model_args)
+            model = Mean(model_config, train_dataset)
+        elif init_from == 'resume':
+            raise NotImplementedError("Mean model doesn't support resume training")
+    case 'Median':
+        model_args = dict(
+            out_dim=out_dim,
+            rppg_labels_diff_std=rppg_labels_diff_std
+        )  # start with model_args from command line
+        if init_from == 'scratch':
+            model_config = MedianConfig(**model_args)
+            model = Median(model_config, train_dataset)
+        elif init_from == 'resume':
+            raise NotImplementedError("Median model doesn't support resume training")
     case 'DeepPhys':
         model_args = dict(
             img_h=img_h,
@@ -350,9 +372,9 @@ while True:
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
-                "train/running/loss": train_loss_running,
-                "train/rand_aug/loss": losses['train'],
-                "val/loss": losses['val'],
+                "train/running_loss": train_loss_running,
+                "train/rand_aug_loss": losses['train'],
+                "val/val_loss": losses['val'],
                 "lr": lr,
                 # "mfu": FUTURE: estimate mfu and convert it to percentage
             })
@@ -402,8 +424,9 @@ while True:
             ppg_labels = ppg_labels.to(device, non_blocking=True)
         else:
             nir_imgs, ppg_labels = nir_imgs.to(device), ppg_labels.to(device)
-        # backward pass, with gradient scaling if training in fp16
-        scaler.scale(loss).backward()
+        if model_name not in ['Mean', 'Median']:  # don't backprop since Mean & Median model has no gradients
+            # backward pass, with gradient scaling if training in fp16
+            scaler.scale(loss).backward()
     # clip the gradient
     if grad_clip != 0.0:
         scaler.unscale_(optimizer)
