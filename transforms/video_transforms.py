@@ -46,7 +46,7 @@ class VideoTransform(nn.Module):
                 if required_timesteps > all_nir_imgs.shape[0]:  # no enough timesteps to perform freq scale
                     nir_imgs = all_nir_imgs[:self.config.window_size]
                     ppg_labels = all_ppg_labels[:self.config.window_size]
-                else:
+                else:  # FUTURE: How to deal with face_locations when freq scale?
                     required_nir_imgs = all_nir_imgs[:required_timesteps].permute(1, 0, 2, 3).unsqueeze(0)  # (1, 1, required_timesteps, img_h, img_w)
                     required_ppg_labels = all_ppg_labels[:required_timesteps].permute(1, 0).unsqueeze(0)  # (1, 1, required_timesteps)
                     resampled_timesteps = (required_timesteps - 1) * freq_scale_denominator + 1
@@ -54,8 +54,10 @@ class VideoTransform(nn.Module):
                                                          mode='trilinear', align_corners=True).reshape(resampled_timesteps, 1, img_h, img_w)
                     ppg_labels = nn.functional.interpolate(required_ppg_labels, size=(resampled_timesteps),
                                                            mode='linear', align_corners=True).reshape(resampled_timesteps, 1)
-                    nir_imgs = nir_imgs[0 : (self.config.window_size - 1) * freq_scale_numerator + 1 : freq_scale_numerator]
-                    ppg_labels = ppg_labels[0 : (self.config.window_size - 1) * freq_scale_numerator + 1 : freq_scale_numerator]
+                    window_resampled_timesteps = (self.config.window_size - 1) * freq_scale_numerator + 1
+                    rand_start_timestep = np.random.randint(0, resampled_timesteps - (window_resampled_timesteps - 1))
+                    nir_imgs = nir_imgs[rand_start_timestep : rand_start_timestep + window_resampled_timesteps : freq_scale_numerator]
+                    ppg_labels = ppg_labels[rand_start_timestep : rand_start_timestep + window_resampled_timesteps : freq_scale_numerator]
         else:
             nir_imgs = all_nir_imgs[:self.config.window_size]
             ppg_labels = all_ppg_labels[:self.config.window_size]
