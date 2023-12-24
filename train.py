@@ -39,6 +39,8 @@ crop_face_type = 'no'  # 'no', 'video_fist', 'window_first', 'every'
 bbox_scale = 1.
 nir_imgs_mean = 0.0
 nir_imgs_std = 1.0
+nir_imgs_diff_mean = 0.0
+nir_imgs_diff_std = 1.0
 rppg_labels_diff_std = 1.0
 # transform related
 video_freq_scale_range = (1.0, 1.0)  # augmented freq ~= freq * random.uniform(min, max), e.g., (0.7, 1.4)
@@ -241,6 +243,8 @@ match model_name:
             dropout=dropout,
             nir_imgs_mean=nir_imgs_mean,
             nir_imgs_std=nir_imgs_std,
+            nir_imgs_diff_mean=nir_imgs_diff_mean,
+            nir_imgs_diff_std=nir_imgs_diff_std,
             rppg_labels_diff_std=rppg_labels_diff_std
         )  # start with model_args from command line
         if init_from == 'scratch':

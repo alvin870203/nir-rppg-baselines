@@ -17,8 +17,10 @@ train_list = (                       'Subject1_still_940', 'Subject2_motion_940'
 val_list = ('Subject1_motion_940',)
 crop_face_type = 'window_first'  # 'window_first', 'video_fist', 'window_first', 'every'
 bbox_scale = 1.6
-nir_imgs_mean = 0.0
-nir_imgs_std = 1.0
+nir_imgs_mean = 0.34259406
+nir_imgs_std = 0.13456167
+nir_imgs_diff_mean = 7.6394883e-07
+nir_imgs_diff_std = 0.004269874
 rppg_labels_diff_std = 6.969092845916748
 
 # transform related

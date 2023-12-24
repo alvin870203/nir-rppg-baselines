@@ -23,6 +23,8 @@ class DeepPhysConfig:
     dropout: float = 0.50
     nir_imgs_mean: float = 0.0
     nir_imgs_std: float = 1.0
+    nir_imgs_diff_mean: float = 0.0
+    nir_imgs_diff_std: float = 1.0
     rppg_labels_diff_std: float = 1.0
 
 
@@ -79,9 +81,8 @@ class DeepPhys(nn.Module):
         device = nir_imgs.device
 
         # Implementation by terbed/Deep-rPPG
-        nir_imgs = (nir_imgs - self.config.nir_imgs_mean) / self.config.nir_imgs_std  # Normalization
-        A = nir_imgs[:, 0]
-        M = torch.div(nir_imgs[:, 1] - nir_imgs[:, 0], nir_imgs[:, 1] + nir_imgs[:, 0] + 1e-8)  # +1e-8 to avoid division by zero
+        A = (nir_imgs[:, 0] - self.config.nir_imgs_mean) / self.config.nir_imgs_std
+        M = (torch.div(nir_imgs[:, 1] - nir_imgs[:, 0], nir_imgs[:, 1] + nir_imgs[:, 0] + 1e-8) - self.config.nir_imgs_diff_mean) / self.config.nir_imgs_diff_std  # +1e-8 to avoid division by zero
 
         # (A) - Appearance stream -------------------------------------------------------------
         # First two convolution layer
