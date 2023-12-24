@@ -43,6 +43,7 @@ rppg_labels_diff_std = 1.0
 # transform related
 video_freq_scale_range = (1.0, 1.0)  # augmented freq ~= freq * random.uniform(min, max), e.g., (0.7, 1.4)
 video_freq_scale_p = 0.0  # probability of applying random video freq scale
+video_freq_scale_dt = 10  # max number of intervals to resampled between two originally consecutive frames
 window_shift = 0.0  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
 window_shift_p = 0.0  # probability of applying random bbox shift
 window_scale_range = (1.0, 1.0)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
@@ -107,7 +108,8 @@ video_transform_args = dict(
     window_size=window_size,
     video_fps=video_fps,
     video_freq_scale_range=video_freq_scale_range,
-    video_freq_scale_p=video_freq_scale_p
+    video_freq_scale_p=video_freq_scale_p,
+    video_freq_scale_dt=video_freq_scale_dt
 )
 video_transform_config = VideoTransformConfig(**video_transform_args)
 video_transform = VideoTransform(video_transform_config)

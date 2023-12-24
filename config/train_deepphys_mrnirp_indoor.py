@@ -24,11 +24,12 @@ rppg_labels_diff_std = 6.969092845916748
 # transform related
 video_freq_scale_range = (1.0, 1.0)  # augmented freq ~= freq * random.uniform(min, max), e.g., (0.7, 1.4)
 video_freq_scale_p = 0.0  # probability of applying random video freq scale
-window_shift = 0.0  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
-window_shift_p = 0.0  # probability of applying random bbox shift
-window_scale_range = (1.0, 1.0)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
-window_scale_p = 0.0  # probability of applying random bbox scale
-window_hflip_p = 0.0
+video_freq_scale_dt = 10  # max number of intervals to resampled between two originally consecutive frames
+window_shift = 0.2  # augmented bbox center_{x or y} = center_{x or y} + bbox_{w or h} * random.uniform(-max, max))
+window_shift_p = 0.5  # probability of applying random bbox shift
+window_scale_range = (0.625, 1.0)  # augmented bbox_scale = bbox_scale * random.uniform(min, max)
+window_scale_p = 0.5  # probability of applying random bbox scale
+window_hflip_p = 0.5
 
 # training related
 # the number of examples per iter:
@@ -58,14 +59,14 @@ bias = True
 dropout = 0.50
 
 # optimizer related
-learning_rate = 6e-4  # max learning rate
+learning_rate = 1e-4  # max learning rate
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 0.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = True  # whether to decay the learning rate
-warmup_iters = 2500  # how many steps to warm up for
-lr_decay_iters = 25000  # should be ~= max_iters
+warmup_iters = 5000  # how many steps to warm up for
+lr_decay_iters = 50000  # should be ~= max_iters
 min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10
 
 # system related

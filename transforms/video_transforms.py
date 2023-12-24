@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from fractions import Fraction
 import numpy as np
 import torch
 import torch.nn as nn
@@ -12,6 +13,7 @@ class VideoTransformConfig:
     video_fps: float = 30.
     video_freq_scale_range: tuple[float, float] = (1.0, 1.0)  # augmented freq ~= freq * random.uniform(min, max), e.g., (0.7, 1.4)
     video_freq_scale_p: float = 0.0  # probability of applying random video freq scale
+    video_freq_scale_dt: int = 10  # max number of intervals to resampled between two originally consecutive frames
 
 
 class VideoTransform(nn.Module):
@@ -34,33 +36,26 @@ class VideoTransform(nn.Module):
         if "random_freq_scale" in self.transform:  # This is not an accurate way to perform freq scale, but it's simple
             freq_scale = np.random.choice([1.0, np.random.uniform(*self.config.video_freq_scale_range)],
                                           p=[1 - self.config.video_freq_scale_p, self.config.video_freq_scale_p])
-
             if freq_scale == 1.0:
                 nir_imgs = all_nir_imgs[:self.config.window_size]
                 ppg_labels = all_ppg_labels[:self.config.window_size]
-            elif freq_scale < 1.0:
-                required_timesteps = int(np.ceil((self.config.window_size - 1) * freq_scale + 1))
-                required_nir_imgs = all_nir_imgs[:required_timesteps].permute(1, 0, 2, 3).unsqueeze(0)  # (1, 1, required_timesteps, img_h, img_w)
-                required_ppg_labels = all_ppg_labels[:required_timesteps].permute(1, 0).unsqueeze(0)  # (1, 1, required_timesteps)
-                resampled_timesteps = int(np.floor((required_timesteps - 1) / freq_scale + 1))
-                nir_imgs = nn.functional.interpolate(required_nir_imgs, size=(resampled_timesteps, img_h, img_w),
-                                                     mode='trilinear', align_corners=True).reshape(resampled_timesteps, 1, img_h, img_w)
-                ppg_labels = nn.functional.interpolate(required_ppg_labels, size=(resampled_timesteps),
-                                                       mode='linear', align_corners=True).reshape(resampled_timesteps, 1)
-                nir_imgs = nir_imgs[:self.config.window_size]
-                ppg_labels = ppg_labels[:self.config.window_size]
-            else:  # freq_scale > 1.0
-                required_timesteps = int(np.ceil((self.config.window_size - 1) * freq_scale + 1))
+            else:
+                freq_scale_numerator = Fraction(freq_scale).limit_denominator(self.config.video_freq_scale_dt).numerator
+                freq_scale_denominator = Fraction(freq_scale).limit_denominator(self.config.video_freq_scale_dt).denominator
+                required_timesteps = np.ceil((self.config.window_size - 1) * freq_scale_numerator / freq_scale_denominator).astype(int).item() + 1
                 if required_timesteps > all_nir_imgs.shape[0]:  # no enough timesteps to perform freq scale
                     nir_imgs = all_nir_imgs[:self.config.window_size]
                     ppg_labels = all_ppg_labels[:self.config.window_size]
                 else:
                     required_nir_imgs = all_nir_imgs[:required_timesteps].permute(1, 0, 2, 3).unsqueeze(0)  # (1, 1, required_timesteps, img_h, img_w)
                     required_ppg_labels = all_ppg_labels[:required_timesteps].permute(1, 0).unsqueeze(0)  # (1, 1, required_timesteps)
-                    nir_imgs = nn.functional.interpolate(required_nir_imgs, size=(self.config.window_size, img_h, img_w),
-                                                         mode='trilinear', align_corners=True).reshape(self.config.window_size, 1, img_h, img_w)
-                    ppg_labels = nn.functional.interpolate(required_ppg_labels, size=(self.config.window_size),
-                                                           mode='linear', align_corners=True).reshape(self.config.window_size, 1)
+                    resampled_timesteps = (required_timesteps - 1) * freq_scale_denominator + 1
+                    nir_imgs = nn.functional.interpolate(required_nir_imgs, size=(resampled_timesteps, img_h, img_w),
+                                                         mode='trilinear', align_corners=True).reshape(resampled_timesteps, 1, img_h, img_w)
+                    ppg_labels = nn.functional.interpolate(required_ppg_labels, size=(resampled_timesteps),
+                                                           mode='linear', align_corners=True).reshape(resampled_timesteps, 1)
+                    nir_imgs = nir_imgs[0 : (self.config.window_size - 1) * freq_scale_numerator + 1 : freq_scale_numerator]
+                    ppg_labels = ppg_labels[0 : (self.config.window_size - 1) * freq_scale_numerator + 1 : freq_scale_numerator]
         else:
             nir_imgs = all_nir_imgs[:self.config.window_size]
             ppg_labels = all_ppg_labels[:self.config.window_size]
