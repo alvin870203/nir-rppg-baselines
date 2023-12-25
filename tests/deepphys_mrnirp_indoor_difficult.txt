@@ -1,0 +1,9 @@
+Difficult (worse than Mean): 'Subject8_still_940', 'Subject6_still_940', 'Subject2_motion_940'
+Hypothesis:
+    'Subject2_motion_940': TODO
+    'Subject6_still_940': Too few low freq examples in train set.
+    'Subject8_still_940': TODO
+Verification:
+    'Subject2_motion_940': TODO
+    'Subject6_still_940': Freq scale augmentation.
+    'Subject8_still_940': TODO
